@@ -7,8 +7,8 @@ from urllib.error import URLError
 
 
 def load_key():
-    with open("properties/api_key", "r") as file:
-        return file.readlines()[0].stripr()
+    with open("config/api_key", "r") as file:
+        return file.readlines()[0].strip()
 
 
 def main(write_dir, file_name):
