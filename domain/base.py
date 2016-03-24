@@ -1,10 +1,10 @@
 class DataRequest(object):
 
-    def init(self):
+    def __init__(self):
         # Data query start-time in UTC
-        self.start_date_time = None
+        self.start_datetime = None
         # Data query end-time in UTC
-        self.end_date_time = None
+        self.end_datetime = None
         # Maximum resolution in minutes
         self.time_resolution = None
         # None is world-wide, else provide a list with two tuples
@@ -13,28 +13,27 @@ class DataRequest(object):
 
 class DataResponse(object):
 
-    def init(self):
-        # List of included station ids
-        self.station_ids = []
+    def __init__(self):
         # Map from station ids to station objects
         self.data_map = {}
 
 
 class Station(object):
 
-    def init(self):
-        self.station_id = None
-        self.latitude = None
-        self.longitude = None
-        self.elevation = None
-        self.meta_data = None
+    def __init__(self, station_id, lat, lon):
+        self.station_id = station_id
+        self.latitude = lat
+        self.longitude = lon
         # List of ObservationData objects by valid_date_time in ascending order
         self.forecast_data = []
 
 
 class ObservationData(object):
 
-    def init(self):
+    def __init__(self):
         # All times are in UTC
-        self.valid_date_time = None
-        # Other objects are optional
+        self.valid_datetime = None
+        self.temperature = None
+        self.humidity = None
+        self.pressure = None
+        # TODO Now for other measurement modules
