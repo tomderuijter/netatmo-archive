@@ -1,6 +1,7 @@
 # Written for python3.4
 import sys
 import json
+from domain.fs_engine import save_file
 from time import time
 from urllib.request import Request, urlopen
 from urllib.error import URLError
@@ -12,6 +13,12 @@ def load_key():
 
 
 def main(write_dir, file_name):
+    """
+    parameters
+    ----------
+    write_dir: str, directory path to write towith trailing slash
+    file_name: str, file name to write to without extension
+    """
 
     query_start = time()
     request_template = 'https://api.netatmo.net/api/getallweatherdata?key=%s'
@@ -43,13 +50,14 @@ def main(write_dir, file_name):
         filtered_json.append(point)
 
     # Write data
-    file_path = write_dir + file_name + '.json'
 
     print("Writing data to file..")
     write_start = time()
-    with open(file_path, 'w') as file:
-        json.dump(filtered_json, file)
+    save_file(filtered_json, write_dir, file_name + ".json")
     print("Total write time: %fs" % (time() - write_start))
+
+
+
 
 
 def inside_box(lat, lon):

@@ -1,5 +1,6 @@
 import os
 import json
+import gzip
 from datetime import datetime, timedelta
 
 
@@ -69,10 +70,16 @@ class FileSystemEngine(object):
         return response
 
 
+def save_file(obj, file_path, file_name):
+    """Compress and store a json object to disk"""
+    with gzip.open(file_path + file_name + ".gz", "wb") as fp:
+        fp.write(json.dumps(obj).encode('utf-8'))
+
+
 def load_file(file_path, file_name):
-    # TODO Do unzipping and json conversion here.
-    with open(file_path + file_name, "r") as fp:
-        return json.load(fp)
+    """Load a compressed json file from disk"""
+    with gzip.open(file_path + file_name + ".gz", "rb") as fp:
+        return json.loads(fp.read().decode('utf-8'))
 
 
 def parse_stations(station_list, data_map):
