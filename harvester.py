@@ -53,11 +53,8 @@ def main(write_dir, file_name):
 
     print("Writing data to file..")
     write_start = time()
-    save_file(filtered_json, write_dir, file_name + ".json")
+    save_file(filtered_json, write_dir, file_name + ".json.gz")
     print("Total write time: %fs" % (time() - write_start))
-
-
-
 
 
 def inside_box(lat, lon):

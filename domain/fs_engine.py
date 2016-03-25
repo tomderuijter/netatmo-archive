@@ -23,7 +23,7 @@ class FileSystemEngine(object):
     def ls(self):
         """List json file objects in engine directory"""
         return_list = [
-            f for f in os.listdir(self.directory) if f.endswith(".json")
+            f for f in os.listdir(self.directory) if f.endswith(".json.gz")
         ]
         return_list.sort()
         return return_list
@@ -72,13 +72,13 @@ class FileSystemEngine(object):
 
 def save_file(obj, file_path, file_name):
     """Compress and store a json object to disk"""
-    with gzip.open(file_path + file_name + ".gz", "wb") as fp:
+    with gzip.open(file_path + file_name, "wb") as fp:
         fp.write(json.dumps(obj).encode('utf-8'))
 
 
 def load_file(file_path, file_name):
     """Load a compressed json file from disk"""
-    with gzip.open(file_path + file_name + ".gz", "rb") as fp:
+    with gzip.open(file_path + file_name, "rb") as fp:
         return json.loads(fp.read().decode('utf-8'))
 
 
@@ -90,6 +90,7 @@ def parse_stations(station_list, data_map):
     station_list: list, list of all station ids included in data_map
     data_map: dict, mapping of station ids to Station objects
     """
+
     for point in station_list:
         # Data sanitization
         if 'location' not in point:
@@ -132,7 +133,7 @@ def parse_station_data(station_data, station):
 
     # Simple duplicate detection
     if len(station.forecast_data) > 0 and \
-       station.forecast_data[-1].valid_datetime <= valid_datetime:
+       station.forecast_data[-1].valid_datetime >= valid_datetime:
         raise IOError("duplicate measurement or earlier measurement")
 
     observation = ObservationData()
@@ -173,7 +174,7 @@ def datetime_to_file_name(timestamp):
     # datetime(year, month, day, hour, min, tzinfo=timezone.utc)
     assert isinstance(timestamp, datetime)
 
-    return "netatmo_%s%s%s_%s%s.json" % (
+    return "netatmo_%s%s%s_%s%s.json.gz" % (
         str(timestamp.year).zfill(4),
         str(timestamp.month).zfill(2),
         str(timestamp.day).zfill(2),
