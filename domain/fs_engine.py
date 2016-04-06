@@ -102,7 +102,7 @@ def parse_stations(station_list, data_map):
 
         # Extract data
         station_id = point['_id']
-        lat, lon = point['location']
+        lon, lat = point['location']
 
         #   See if station is in requested region
         # TODO

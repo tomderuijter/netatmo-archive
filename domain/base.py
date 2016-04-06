@@ -24,6 +24,7 @@ class Station(object):
         self.station_id = station_id
         self.latitude = lat
         self.longitude = lon
+        self.elevation = None
         # List of ObservationData objects by valid_date_time in ascending order
         self.forecast_data = []
 
