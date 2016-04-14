@@ -41,17 +41,14 @@ class ElevationServiceConnector(object):
                       (c, nr_requests, time() - query_start))
             # Prepare request
             request_url = self.get_query_url(points[c][0], points[c][1])
-            print(request_url)
             request = Request(request_url)
 
             try:
                 # Do HTTPRequest
                 response = urlopen(request)
                 content = response.read().decode('utf-8')
-                print(content)
                 # Parse JSON.
                 result = json.loads(content)
-                print(list(result.keys()))
                 if 'properties' not in result:
                     raise JsonContentException("1Elevation data not available")
 
@@ -67,7 +64,7 @@ class ElevationServiceConnector(object):
                 elevations[c] = int(result['properties']['elevationInMeter'])
 
                 # Overload protection
-                sleep(0.01)
+                # sleep(0.01)
 
             except URLError as e:
                 print('HTTP Error:', e)

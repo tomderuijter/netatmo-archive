@@ -7,7 +7,8 @@ class DataRequest(object):
         self.end_datetime = None
         # Maximum resolution in minutes
         self.time_resolution = None
-        # None is world-wide, else provide a list with two tuples
+        # None is world-wide, else provide a tuple four entries marking the
+        # top left and lower right lat-lon points of the bounding box.
         self.region = None
 
 
