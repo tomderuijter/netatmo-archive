@@ -62,7 +62,7 @@ class FileSystemEngine(object):
                 raise RuntimeError()
 
             # Extract and add data
-            parse_stations(json_data, data_map)
+            parse_stations(json_data, data_map, request.region)
 
         # Create response object
         response = DataResponse()
@@ -82,7 +82,7 @@ def load_file(file_path, file_name):
         return json.loads(fp.read().decode('utf-8'))
 
 
-def parse_stations(station_list, data_map):
+def parse_stations(station_list, data_map, region=None):
     """Given contents of a single data file, update the given data objects.
 
     parameters
@@ -105,7 +105,8 @@ def parse_stations(station_list, data_map):
         lon, lat = point['location']
 
         #   See if station is in requested region
-        # TODO
+        if region is not None and not inside_box(lat, lon, *region):
+            continue
 
         # Add station to map
         if station_id not in data_map:
@@ -115,6 +116,14 @@ def parse_stations(station_list, data_map):
             parse_station_data(point['data'], data_map[station_id])
         except IOError:
             continue
+
+
+def inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
+    """Given query point (lat, lon) considers whether point is indide the box
+    defined by top left point (tl_lat, tl_lon) and bottom right point
+    (br_lat, br_lon).
+    """
+    return lat >= br_lat and lat <= tl_lat and lon >= tl_lon and lon <= br_lon
 
 
 def parse_station_data(station_data, station):
