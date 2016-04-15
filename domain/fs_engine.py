@@ -171,8 +171,8 @@ def parse_station_data(station_data, station):
 
     # Simple duplicate detection
     if station.thermo_module is not None and \
-       station.thermo_module['valid_datetime'][-1] >= valid_datetime:
-        raise IOError("duplicate measurement or earlier measurement")
+       station.thermo_module['valid_datetime'][-1] == valid_datetime:
+        raise IOError("duplicate measurement")
 
     if station.thermo_module is None:
         station.thermo_module = {
@@ -234,7 +234,7 @@ def datetime_to_file_name(timestamp):
 
 
 # TODO Really really slow. Works well for large amounts per station.
-def resample_and_interpolate(data_map):
+def resample_and_interpolate(data_map, resolution=10):
 
     for count, station_id in enumerate(data_map):
         if count % 1000 == 0:
@@ -245,7 +245,7 @@ def resample_and_interpolate(data_map):
         if station.thermo_module is not None:
             df = pd.DataFrame(station.thermo_module)
             df.set_index('valid_datetime', drop=True, inplace=True)
-            df = df.resample('10T').mean().interpolate()
+            df = df.resample(str(resolution) + 'T').interpolate()
         else:
             df = pd.DataFrame()
         station.thermo_module = df
