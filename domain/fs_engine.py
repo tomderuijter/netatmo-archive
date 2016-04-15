@@ -1,6 +1,8 @@
 import os
 import json
 import gzip
+import pandas as pd
+from numpy import nan
 from datetime import datetime, timedelta
 
 
@@ -9,7 +11,6 @@ from .base import (
     DataRequest,
     DataResponse,
     Station,
-    ObservationData
 )
 
 
@@ -63,6 +64,10 @@ class FileSystemEngine(object):
 
             # Extract and add data
             parse_stations(json_data, data_map, request.region)
+
+        # Convert dictionary to pandas dataframe
+        print("Resampling and interpolating station data..")
+        resample_and_interpolate(data_map)
 
         # Create response object
         response = DataResponse()
@@ -132,7 +137,8 @@ def parse_station_data(station_data, station):
     parameters
     ----------
     station_data: dict, contains atmospherical values
-    station: Station object"""
+    station: Station object
+    """
 
     # TODO Not finished: this does not support other netatmo modules
     if 'time_utc' not in station_data:
@@ -141,19 +147,30 @@ def parse_station_data(station_data, station):
     valid_datetime = datetime.utcfromtimestamp(station_data['time_utc'])
 
     # Simple duplicate detection
-    if len(station.forecast_data) > 0 and \
-       station.forecast_data[-1].valid_datetime >= valid_datetime:
+    if station.forecast_data is not None and \
+       station.forecast_data['valid_datetime'][-1] >= valid_datetime:
         raise IOError("duplicate measurement or earlier measurement")
 
-    observation = ObservationData()
-    observation.valid_datetime = valid_datetime
-    if 'Temperature' in station_data:
-        observation.temperature = station_data['Temperature']
-    if 'Humidity' in station_data:
-        observation.humidity = station_data['Humidity']
-    if 'Pressure' in station_data:
-        observation.pressure = station_data['Pressure']
-    station.forecast_data.append(observation)
+    if station.forecast_data is None:
+        station.forecast_data = {
+            'valid_datetime': [],
+            'temperature': [],
+            'humidity': [],
+            'pressure': []
+        }
+
+    station.forecast_data['valid_datetime'].append(valid_datetime)
+    add_value(station_data, 'Temperature', station.forecast_data,
+              'temperature')
+    add_value(station_data, 'Humidity', station.forecast_data, 'humidity')
+    add_value(station_data, 'Pressure', station.forecast_data, 'pressure')
+
+
+def add_value(input_dict, input_name, output_dict, output_name):
+    value = nan
+    if input_name in input_dict:
+        value = input_dict[input_name]
+    output_dict[output_name].append(value)
 
 
 def datetime_range(start_timestamp, end_timestamp, stepsize):
@@ -190,3 +207,21 @@ def datetime_to_file_name(timestamp):
         str(timestamp.hour).zfill(2),
         str(timestamp.minute).zfill(2)
     )
+
+
+# TODO Really really slow. Works well for large amounts per station.
+def resample_and_interpolate(data_map):
+
+    for count, station_id in enumerate(data_map):
+        if count % 1000 == 0:
+            print("%d / %d stations processed.." % (count, len(data_map)))
+
+        station = data_map[station_id]
+
+        if station.forecast_data is not None:
+            df = pd.DataFrame(station.forecast_data)
+            df.set_index('valid_datetime', drop=True, inplace=True)
+            df = df.resample('10T').mean().interpolate()
+        else:
+            df = pd.DataFrame()
+        station.forecast_data = df

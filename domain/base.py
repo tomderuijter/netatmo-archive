@@ -26,16 +26,5 @@ class Station(object):
         self.latitude = lat
         self.longitude = lon
         self.elevation = None
-        # List of ObservationData objects by valid_date_time in ascending order
-        self.forecast_data = []
-
-
-class ObservationData(object):
-
-    def __init__(self):
-        # All times are in UTC
-        self.valid_datetime = None
-        self.temperature = None
-        self.humidity = None
-        self.pressure = None
-        # TODO Now for other measurement modules
+        # Pandas dataframe
+        self.forecast_data = None

@@ -55,9 +55,36 @@ def load_netherlands(fspath):
     return response.data_map
 
 
+def load_test(fspath):
+    fsengine = FileSystemEngine(fspath)
+
+    request = DataRequest()
+    start_dt = datetime(2016, 4, 10, 10, 30)
+    end_dt = datetime(2016, 4, 10, 10, 40)
+    request.start_datetime = start_dt
+    request.end_datetime = end_dt
+    request.time_resolution = 10
+    request.region = (53.680, 2.865, 50.740, 7.323)
+    print("Querying file system engine..")
+    response = fsengine.query(request)
+    return response.data_map
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1:
         fspath = sys.argv[1]
     else:
         fspath = 'X:/netatmo/data/'
-    data_map = load_global(fspath)
+    # data_map = load_global(fspath)
+    # data_map = load_netherlands(fspath)
+    data_map = load_test(fspath)
+
+    # test_data_path = 'data/test_data.pkl'
+    # import pickle
+    # with open(test_data_path, 'rb') as f:
+    #     data_map = pickle.load(f)
+    #
+    # station_ids = []
+    # for station in data_map:
+    #     if len(data_map[station].forecast_data) > 1:
+    #         station_ids.append(station)
