@@ -6,12 +6,26 @@ from urllib.request import Request, urlopen
 from urllib.error import URLError
 
 # User modules
-from domain.fs_engine import save_file
+from domain.fs_engine import (
+    save_file,
+    save_file_aws
+)
 
 
 def load_key():
     with open("config/api_key", "r") as file:
         return file.readlines()[0].strip()
+
+
+def _load_aws_keys():
+    lines = None
+    with open("config/AWS_key", "r") as f:
+        lines = f.readlines()
+        aws_s3_path = lines[0].split('=')[1].strip()
+        aws_access_key = lines[1].split('=')[1].strip()
+        aws_secret_key = lines[2].split('=')[1].strip()
+        return (aws_s3_path, aws_access_key, aws_secret_key)
+    raise IOError("AWS identity could not be loaded.")
 
 
 def main(write_dir, file_name):
@@ -24,8 +38,8 @@ def main(write_dir, file_name):
 
     query_start = time()
     request_template = 'https://api.netatmo.net/api/getallweatherdata?key=%s'
-    # TODO Load key from file.
     key = load_key()
+    aws_keys = _load_aws_keys()
 
     # Prepare request
     request_url = request_template % (key)
@@ -55,7 +69,14 @@ def main(write_dir, file_name):
 
     print("Writing data to file..")
     write_start = time()
-    save_file(filtered_json, write_dir, file_name + ".json.gz")
+    save_file(
+        filtered_json, write_dir + file_name + ".json.gz")
+    print("Total write time: %fs" % (time() - write_start))
+
+    print("Writing data to S3..")
+    write_start = time()
+    save_file_aws(
+        filtered_json, file_name + ".json.gz", aws_keys)
     print("Total write time: %fs" % (time() - write_start))
 
 
