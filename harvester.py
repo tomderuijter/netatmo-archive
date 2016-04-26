@@ -1,10 +1,12 @@
 # Written for python3.4
 import sys
 import json
-from domain.fs_engine import save_file
 from time import time
 from urllib.request import Request, urlopen
 from urllib.error import URLError
+
+# User modules
+from domain.fs_engine import save_file
 
 
 def load_key():

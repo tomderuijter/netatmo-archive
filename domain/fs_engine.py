@@ -13,6 +13,7 @@ from .base import (
     DataResponse,
     Station,
 )
+from domain.aws_engine import S3Bucket
 
 
 class FileSystemEngine(object):
@@ -94,16 +95,35 @@ class FileSystemEngine(object):
         return response
 
 
-def save_file(obj, file_path, file_name):
+def save_file(obj, file_path):
     """Compress and store a json object to disk."""
-    with gzip.open(file_path + file_name, "wb") as fp:
+    with gzip.open(file_path, "wb") as fp:
         fp.write(json.dumps(obj).encode('utf-8'))
 
 
-def load_file(file_path, file_name):
+def save_file_aws(obj, file_path, aws_credentials):
+    """Compress and store a json object or dictionary to an S3 bucket."""
+    # TODO Persist session.
+    bucket_engine = S3Bucket(*aws_credentials)
+    data = gzip.compress(json.dumps(obj).encode('utf-8'))
+    bucket_engine.write(file_path, data)
+
+
+def load_file(file_path):
     """Load a compressed json file from disk."""
-    with gzip.open(file_path + file_name, "rb") as fp:
+    with gzip.open(file_path, "rb") as fp:
         return json.loads(fp.read().decode('utf-8'))
+
+
+def load_file_aws(file_path, aws_credentials):
+    """Load a compressed json file from S3."""
+    # TODO Persist session.
+    bucket_engine = S3Bucket(*aws_credentials)
+    return json.loads(
+        gzip.decompress(
+            bucket_engine.read(file_path)
+        ).decode('utf-8')
+    )
 
 
 def parse_stations(station_list, data_map, region=None):
