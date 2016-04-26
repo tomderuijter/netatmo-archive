@@ -1,3 +1,4 @@
+"""Module for accessing NetAtmo files using the file system."""
 import os
 import json
 import gzip
@@ -15,14 +16,16 @@ from .base import (
 
 
 class FileSystemEngine(object):
-    """Translates query to response using the file system"""
+    """Translate the query to response using the file system."""
+
     # TODO Extract a common class engine
 
     def __init__(self, dir_path):
+        """Constructor."""
         self.directory = dir_path
 
     def ls(self):
-        """List json file objects in engine directory"""
+        """List json file objects in engine directory."""
         return_list = [
             f for f in os.listdir(self.directory) if f.endswith(".json.gz")
         ]
@@ -30,6 +33,7 @@ class FileSystemEngine(object):
         return return_list
 
     def query(self, request):
+        """Query the file system."""
         assert isinstance(request, DataRequest)
 
         # Initialize data objects
@@ -76,13 +80,13 @@ class FileSystemEngine(object):
 
 
 def save_file(obj, file_path, file_name):
-    """Compress and store a json object to disk"""
+    """Compress and store a json object to disk."""
     with gzip.open(file_path + file_name, "wb") as fp:
         fp.write(json.dumps(obj).encode('utf-8'))
 
 
 def load_file(file_path, file_name):
-    """Load a compressed json file from disk"""
+    """Load a compressed json file from disk."""
     with gzip.open(file_path + file_name, "rb") as fp:
         return json.loads(fp.read().decode('utf-8'))
 
@@ -95,7 +99,6 @@ def parse_stations(station_list, data_map, region=None):
     station_list: list, list of all station ids included in data_map
     data_map: dict, mapping of station ids to Station objects
     """
-
     for point in station_list:
         # Data sanitization
         if 'location' not in point:
@@ -124,7 +127,9 @@ def parse_stations(station_list, data_map, region=None):
 
 
 def inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
-    """Given query point (lat, lon) considers whether point is indide the box
+    """Whether a coordinate is inside a bounding box.
+
+    Given query point (lat, lon) considers whether point is indide the box
     defined by top left point (tl_lat, tl_lon) and bottom right point
     (br_lat, br_lon).
     """
@@ -132,14 +137,13 @@ def inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
 
 
 def parse_station_data(station_data, station):
-    """Parse data from a single json record
+    """Parse data from a single json record.
 
     parameters
     ----------
     station_data: dict, contains atmospherical values
     station: Station object
     """
-
     # TODO Not finished: this does not support other netatmo modules
     if 'time_utc' not in station_data:
         raise IOError("no timestamp in data")
@@ -160,13 +164,13 @@ def parse_station_data(station_data, station):
         }
 
     station.forecast_data['valid_datetime'].append(valid_datetime)
-    add_value(station_data, 'Temperature', station.forecast_data,
-              'temperature')
-    add_value(station_data, 'Humidity', station.forecast_data, 'humidity')
-    add_value(station_data, 'Pressure', station.forecast_data, 'pressure')
+    _add_value(station_data, 'Temperature', station.forecast_data,
+               'temperature')
+    _add_value(station_data, 'Humidity', station.forecast_data, 'humidity')
+    _add_value(station_data, 'Pressure', station.forecast_data, 'pressure')
 
 
-def add_value(input_dict, input_name, output_dict, output_name):
+def _add_value(input_dict, input_name, output_dict, output_name):
     value = nan
     if input_name in input_dict:
         value = input_dict[input_name]
@@ -191,7 +195,8 @@ def datetime_range(start_timestamp, end_timestamp, stepsize):
 
 
 def datetime_to_file_name(timestamp):
-    """Converts a datetime timestamp to the necessary file name.
+    """Convert a datetime timestamp to the necessary file name.
+
     parameters
     ----------
     timestamp: datetime.datetime object
@@ -211,7 +216,7 @@ def datetime_to_file_name(timestamp):
 
 # TODO Really really slow. Works well for large amounts per station.
 def resample_and_interpolate(data_map):
-
+    """Resample and interpolate a dictionary to pandas dataframe."""
     for count, station_id in enumerate(data_map):
         if count % 1000 == 0:
             print("%d / %d stations processed.." % (count, len(data_map)))
