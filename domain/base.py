@@ -26,5 +26,7 @@ class Station(object):
         self.latitude = lat
         self.longitude = lon
         self.elevation = None
-        # Pandas dataframe
-        self.forecast_data = None
+
+        self.thermo_module = None
+        self.wind_module = None
+        self.precip_module = None

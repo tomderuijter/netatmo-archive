@@ -53,12 +53,12 @@ class FileSystemEngine(object):
         existing_files = self.ls()
 
         # Load request files
-        print("Loading %d files.." % (len(request_file_names)))
+        print("Loading %d files in total." % (len(request_file_names)))
         for (count, file_name) in enumerate(request_file_names):
-            print("File %d.." % (count + 1))
+            print("File %d: %s" % (count + 1, file_name))
             # File does not exist.
             if file_name not in existing_files:
-                print("File %s does not exist" % file_name)
+                print("File does not exist\n")
                 continue
 
             # Open file and parse json
@@ -67,11 +67,26 @@ class FileSystemEngine(object):
                 raise RuntimeError()
 
             # Extract and add data
-            parse_stations(json_data, data_map, request.region)
+            new_stations, station_contributions, out_of_region = \
+                parse_stations(json_data, data_map, request.region)
 
+            # Ingestion logging.
+            print("Total number of stations:           %d" %
+                  (len(data_map)))
+            print("Points in file:                     %d" %
+                  (len(json_data)))
+            print("Points out of region:               %d" %
+                  (out_of_region))
+            print("Points ignored:                     %d" %
+                  (len(json_data) - out_of_region - station_contributions))
+            print("New stations:                       %d" %
+                  (new_stations))
+            print("Points added to dataset:            %d" %
+                  (station_contributions))
+            print()
         # Convert dictionary to pandas dataframe
-        print("Resampling and interpolating station data..")
-        resample_and_interpolate(data_map)
+        # print("Resampling and interpolating station data..")
+        # resample_and_interpolate(data_map)
 
         # Create response object
         response = DataResponse()
@@ -99,6 +114,11 @@ def parse_stations(station_list, data_map, region=None):
     station_list: list, list of all station ids included in data_map
     data_map: dict, mapping of station ids to Station objects
     """
+
+    new_stations = 0
+    station_contributions = 0
+    out_of_region = 0
+
     for point in station_list:
         # Data sanitization
         if 'location' not in point:
@@ -114,16 +134,21 @@ def parse_stations(station_list, data_map, region=None):
 
         #   See if station is in requested region
         if region is not None and not inside_box(lat, lon, *region):
+            out_of_region += 1
             continue
 
         # Add station to map
         if station_id not in data_map:
+            new_stations += 1
             data_map[station_id] = Station(station_id, lat, lon)
 
         try:
-            parse_station_data(point['data'], data_map[station_id])
+            success = parse_station_data(point['data'], data_map[station_id])
+            if success:
+                station_contributions += 1
         except IOError:
             continue
+    return new_stations, station_contributions, out_of_region
 
 
 def inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
@@ -146,28 +171,29 @@ def parse_station_data(station_data, station):
     """
     # TODO Not finished: this does not support other netatmo modules
     if 'time_utc' not in station_data:
-        raise IOError("no timestamp in data")
+        raise IOError("no base module timestamp in data")
 
     valid_datetime = datetime.utcfromtimestamp(station_data['time_utc'])
 
     # Simple duplicate detection
-    if station.forecast_data is not None and \
-       station.forecast_data['valid_datetime'][-1] >= valid_datetime:
-        raise IOError("duplicate measurement or earlier measurement")
+    if station.thermo_module is not None and \
+       station.thermo_module['valid_datetime'][-1] == valid_datetime:
+        raise IOError("duplicate measurement")
 
-    if station.forecast_data is None:
-        station.forecast_data = {
+    if station.thermo_module is None:
+        station.thermo_module = {
             'valid_datetime': [],
             'temperature': [],
             'humidity': [],
             'pressure': []
         }
 
-    station.forecast_data['valid_datetime'].append(valid_datetime)
-    _add_value(station_data, 'Temperature', station.forecast_data,
+    station.thermo_module['valid_datetime'].append(valid_datetime)
+    _add_value(station_data, 'Temperature', station.thermo_module,
                'temperature')
-    _add_value(station_data, 'Humidity', station.forecast_data, 'humidity')
-    _add_value(station_data, 'Pressure', station.forecast_data, 'pressure')
+    _add_value(station_data, 'Humidity', station.thermo_module, 'humidity')
+    _add_value(station_data, 'Pressure', station.thermo_module, 'pressure')
+    return True
 
 
 def _add_value(input_dict, input_name, output_dict, output_name):
@@ -215,7 +241,7 @@ def datetime_to_file_name(timestamp):
 
 
 # TODO Really really slow. Works well for large amounts per station.
-def resample_and_interpolate(data_map):
+def resample_and_interpolate(data_map, resolution=10):
     """Resample and interpolate a dictionary to pandas dataframe."""
     for count, station_id in enumerate(data_map):
         if count % 1000 == 0:
@@ -223,10 +249,10 @@ def resample_and_interpolate(data_map):
 
         station = data_map[station_id]
 
-        if station.forecast_data is not None:
-            df = pd.DataFrame(station.forecast_data)
+        if station.thermo_module is not None:
+            df = pd.DataFrame(station.thermo_module)
             df.set_index('valid_datetime', drop=True, inplace=True)
-            df = df.resample('10T').mean().interpolate()
+            df = df.resample(str(resolution) + 'T').interpolate()
         else:
             df = pd.DataFrame()
-        station.forecast_data = df
+        station.thermo_module = df
