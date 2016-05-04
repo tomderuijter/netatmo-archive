@@ -19,7 +19,8 @@ from domain.aws_engine import S3Bucket
 class FileSystemEngine(object):
     """Translate the query to response using the file system."""
 
-    # TODO Extract a common class engine
+    # TODO TdR 28-4-2016 Extract a common class engine with ls,
+    # read and write methods.
 
     def __init__(self, dir_path):
         """Constructor."""
@@ -33,6 +34,8 @@ class FileSystemEngine(object):
         return_list.sort()
         return return_list
 
+    # TODO TdR 28-4-2016 Move the query out of the FileSystemEngine and
+    # parameterize it wih a DataEngine object.
     def query(self, request):
         """Query the file system."""
         assert isinstance(request, DataRequest)
@@ -63,7 +66,7 @@ class FileSystemEngine(object):
                 continue
 
             # Open file and parse json
-            json_data = load_file(self.directory, file_name)
+            json_data = load_file(self.directory + file_name)
             if json_data is None:
                 raise RuntimeError()
 
@@ -85,9 +88,8 @@ class FileSystemEngine(object):
             print("Points added to dataset:            %d" %
                   (station_contributions))
             print()
-        # Convert dictionary to pandas dataframe
-        # print("Resampling and interpolating station data..")
-        # resample_and_interpolate(data_map)
+
+        # TODO TdR 28-04-2016 Give each station an alias station id.
 
         # Create response object
         response = DataResponse()
@@ -101,23 +103,23 @@ def save_file(obj, file_path):
         fp.write(json.dumps(obj).encode('utf-8'))
 
 
-def save_file_aws(obj, file_path, aws_credentials):
-    """Compress and store a json object or dictionary to an S3 bucket."""
-    # TODO Persist session.
-    bucket_engine = S3Bucket(*aws_credentials)
-    data = gzip.compress(json.dumps(obj).encode('utf-8'))
-    bucket_engine.write(file_path, data)
-
-
 def load_file(file_path):
     """Load a compressed json file from disk."""
     with gzip.open(file_path, "rb") as fp:
         return json.loads(fp.read().decode('utf-8'))
 
 
+def save_file_aws(obj, file_path, aws_credentials):
+    """Compress and store a json object or dictionary to an S3 bucket."""
+    # TODO 28-04-2016 Persist session.
+    bucket_engine = S3Bucket(*aws_credentials)
+    data = gzip.compress(json.dumps(obj).encode('utf-8'))
+    bucket_engine.write(file_path, data)
+
+
 def load_file_aws(file_path, aws_credentials):
     """Load a compressed json file from S3."""
-    # TODO Persist session.
+    # TODO TdR 28-04-2016 Persist session.
     bucket_engine = S3Bucket(*aws_credentials)
     return json.loads(
         gzip.decompress(
@@ -265,14 +267,20 @@ def resample_and_interpolate(data_map, resolution=10):
     """Resample and interpolate a dictionary to pandas dataframe."""
     for count, station_id in enumerate(data_map):
         if count % 1000 == 0:
-            print("%d / %d stations processed.." % (count, len(data_map)))
+            print("%d / %d stations processed.." % (count + 1, len(data_map)))
 
         station = data_map[station_id]
 
-        if station.thermo_module is not None:
+        if station.thermo_module is not None and \
+           type(station.thermo_module) is dict:
             df = pd.DataFrame(station.thermo_module)
             df.set_index('valid_datetime', drop=True, inplace=True)
-            df = df.resample(str(resolution) + 'T').interpolate()
+            interpolation_limit = 3 if resolution <= 20 else 0
+            df = df.resample(str(resolution) + 'T').interpolate(
+                method='time',
+                limit=interpolation_limit
+            )
         else:
             df = pd.DataFrame()
         station.thermo_module = df
+    print("%d / %d stations processed.." % (count + 1, len(data_map)))

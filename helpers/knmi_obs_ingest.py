@@ -66,7 +66,7 @@ class FileSystemEngine(object):
             else:
                 data = data.append(file_data)
 
-        data.sort_values('valid_datetime', axis=0)
+        data.sort_values('valid_datetime', axis=0, inplace=True)
         return data
 
 
