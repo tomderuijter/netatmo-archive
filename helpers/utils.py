@@ -1,4 +1,4 @@
-"""Utility functions for manipulating the station objects"""
+"""Utility functions for manipulating the station objects."""
 from math import (
     radians as deg2rad,
     sin,
@@ -19,7 +19,7 @@ def add_alias(data_map):
 
 
 def get_station_coordinates(data_map):
-    """Returns station coordinates for every station in data_map"""
+    """Return station coordinates for every station in data_map."""
     station_coords = []
     for station_id in data_map:
         station = data_map[station_id]
@@ -36,7 +36,7 @@ def add_station_elevations(data_map, station_ids, elevations):
 
 
 def _distance(point1, point2):
-    """Computes the haversine distance between two (lat,lon) points.
+    r"""Compute the haversine distance between two (lat,lon) points.
 
     This method assumes the earth is a sphere with a constant radius.
     The error is 0.55\%, which is good enough for most uses.
@@ -73,7 +73,6 @@ def select_near(data_map, latitude, longitude, radius=5000):
     longitude: float, longitude of interest.
     radius: float (optional), maximum search radius in meters.
     """
-
     filtered_map = {}
     for station_id in data_map:
         station = data_map[station_id]

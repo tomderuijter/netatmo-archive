@@ -8,12 +8,44 @@ from datetime import datetime, timedelta
 
 
 # User modules
-from .base import (
+from domain.aws_engine import S3Bucket
+from domain.base import (
     DataRequest,
     DataResponse,
     Station,
 )
-from domain.aws_engine import S3Bucket
+from helpers import utils
+
+
+def save_file(obj, file_path):
+    """Compress and store a json object to disk."""
+    with gzip.open(file_path, "wb") as fp:
+        fp.write(json.dumps(obj).encode('utf-8'))
+
+
+def load_file(file_path):
+    """Load a compressed json file from disk."""
+    with gzip.open(file_path, "rb") as fp:
+        return json.loads(fp.read().decode('utf-8'))
+
+
+def save_file_aws(obj, file_path, aws_credentials):
+    """Compress and store a json object or dictionary to an S3 bucket."""
+    # TODO 28-04-2016 Persist session.
+    bucket_engine = S3Bucket(*aws_credentials)
+    data = gzip.compress(json.dumps(obj).encode('utf-8'))
+    bucket_engine.write(file_path, data)
+
+
+def load_file_aws(file_path, aws_credentials):
+    """Load a compressed json file from S3."""
+    # TODO TdR 28-04-2016 Persist session.
+    bucket_engine = S3Bucket(*aws_credentials)
+    return json.loads(
+        gzip.decompress(
+            bucket_engine.read(file_path)
+        ).decode('utf-8')
+    )
 
 
 class FileSystemEngine(object):
@@ -71,61 +103,16 @@ class FileSystemEngine(object):
                 raise RuntimeError()
 
             # Extract and add data
-            new_stations, station_contributions, out_of_region = \
+            parse_stats = \
                 parse_stations(json_data, data_map, request.region)
 
-            # Ingestion logging.
-            print("Total number of stations:           %d" %
-                  (len(data_map)))
-            print("Points in file:                     %d" %
-                  (len(json_data)))
-            print("Points out of region:               %d" %
-                  (out_of_region))
-            print("Points ignored:                     %d" %
-                  (len(json_data) - out_of_region - station_contributions))
-            print("New stations:                       %d" %
-                  (new_stations))
-            print("Points added to dataset:            %d" %
-                  (station_contributions))
-            print()
+            log_parse_stats(parse_stats)
 
-        # TODO TdR 28-04-2016 Give each station an alias station id.
+        utils.add_alias(data_map)
 
-        # Create response object
         response = DataResponse()
         response.data_map = data_map
         return response
-
-
-def save_file(obj, file_path):
-    """Compress and store a json object to disk."""
-    with gzip.open(file_path, "wb") as fp:
-        fp.write(json.dumps(obj).encode('utf-8'))
-
-
-def load_file(file_path):
-    """Load a compressed json file from disk."""
-    with gzip.open(file_path, "rb") as fp:
-        return json.loads(fp.read().decode('utf-8'))
-
-
-def save_file_aws(obj, file_path, aws_credentials):
-    """Compress and store a json object or dictionary to an S3 bucket."""
-    # TODO 28-04-2016 Persist session.
-    bucket_engine = S3Bucket(*aws_credentials)
-    data = gzip.compress(json.dumps(obj).encode('utf-8'))
-    bucket_engine.write(file_path, data)
-
-
-def load_file_aws(file_path, aws_credentials):
-    """Load a compressed json file from S3."""
-    # TODO TdR 28-04-2016 Persist session.
-    bucket_engine = S3Bucket(*aws_credentials)
-    return json.loads(
-        gzip.decompress(
-            bucket_engine.read(file_path)
-        ).decode('utf-8')
-    )
 
 
 def parse_stations(station_list, data_map, region=None):
@@ -136,10 +123,16 @@ def parse_stations(station_list, data_map, region=None):
     station_list: list, list of all station ids included in data_map
     data_map: dict, mapping of station ids to Station objects
     """
-
-    new_stations = 0
-    station_contributions = 0
-    out_of_region = 0
+    # new_stations = 0
+    # station_contributions = 0
+    # out_of_region = 0
+    statistics = {}
+    statistics['new_stations'] = 0
+    statistics['station_thermo_contributions'] = 0
+    statistics['station_hydro_contributions'] = 0
+    statistics['stations_out_of_region'] = 0
+    statistics['station_count'] = 0
+    statistics['stations_in_file'] = len(station_list)
 
     for point in station_list:
         # Data sanitization
@@ -156,34 +149,63 @@ def parse_stations(station_list, data_map, region=None):
 
         #   See if station is in requested region
         if region is not None and not inside_box(lat, lon, *region):
-            out_of_region += 1
+            statistics['stations_out_of_region'] += 1
             continue
 
         # Add station to map
         if station_id not in data_map:
-            new_stations += 1
+            statistics['new_stations'] += 1
             data_map[station_id] = Station(station_id, lat, lon)
 
-        try:
-            success = parse_station_data(point['data'], data_map[station_id])
-            if success:
-                station_contributions += 1
-        except IOError:
-            continue
-    return new_stations, station_contributions, out_of_region
+        thermo_success = \
+            parse_station_thermo_data(point['data'], data_map[station_id])
+        if thermo_success:
+            statistics['station_thermo_contributions'] += 1
+
+        hydro_success = \
+            parse_station_hydro_data(point['data'], data_map[station_id])
+        if hydro_success:
+            statistics['station_hydro_contributions'] += 1
+
+    statistics['station_count'] = len(data_map)
+    return statistics
 
 
-def inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
-    """Whether a coordinate is inside a bounding box.
+def parse_station_hydro_data(station_data, station):
+    """Parse precipitation data from a single json record.
 
-    Given query point (lat, lon) considers whether point is indide the box
-    defined by top left point (tl_lat, tl_lon) and bottom right point
-    (br_lat, br_lon).
+    parameters
+    ----------
+    station_data: dict, contains atmospherical values
+    station: Station object
     """
-    return lat >= br_lat and lat <= tl_lat and lon >= tl_lon and lon <= br_lon
+    if ('time_day_rain' not in station_data) or \
+       ('time_hour_rain' not in station_data):
+        return False
+
+    time_day_rain = datetime.utcfromtimestamp(station_data['time_day_rain'])
+    time_hour_rain = datetime.utcfromtimestamp(station_data['time_hour_rain'])
+
+    # TODO 30-06-2016 TdR: Simple duplicate detection of records.
+
+    if station.hydro_module is None:
+        station.hydro_module = {
+            'time_day_rain': [],
+            'time_hour_rain': [],
+            'daily_rain_sum': [],
+            'hourly_rain_sum': []
+        }
+
+    station.hydro_module['time_day_rain'].append(time_day_rain)
+    station.hydro_module['time_hour_rain'].append(time_hour_rain)
+    _add_value(station_data, 'Rain', station.hydro_module,
+               'daily_rain_sum')
+    _add_value(station_data, 'sum_rain_1', station.hydro_module,
+               'hourly_rain_sum')
+    return True
 
 
-def parse_station_data(station_data, station):
+def parse_station_thermo_data(station_data, station):
     """Parse data from a single json record.
 
     parameters
@@ -191,16 +213,15 @@ def parse_station_data(station_data, station):
     station_data: dict, contains atmospherical values
     station: Station object
     """
-    # TODO Not finished: this does not support other netatmo modules
     if 'time_utc' not in station_data:
-        raise IOError("no base module timestamp in data")
+        return False
 
     valid_datetime = datetime.utcfromtimestamp(station_data['time_utc'])
 
     # Simple duplicate detection
     if station.thermo_module is not None and \
        station.thermo_module['valid_datetime'][-1] == valid_datetime:
-        raise IOError("duplicate measurement")
+        return False
 
     if station.thermo_module is None:
         station.thermo_module = {
@@ -223,6 +244,25 @@ def _add_value(input_dict, input_name, output_dict, output_name):
     if input_name in input_dict:
         value = input_dict[input_name]
     output_dict[output_name].append(value)
+
+
+def log_parse_stats(parse_stats):
+    # Ingestion logging.
+    print("Total number of stations:           %d" %
+          (parse_stats['station_count']))
+    print("Points in file:                     %d" %
+          (parse_stats['stations_in_file']))
+    print("Points out of region:               %d" %
+          (parse_stats['stations_out_of_region']))
+    # print("Points ignored:                     %d" %
+    #   (len(json_data) - out_of_region - station_contributions))
+    print("New stations:                       %d" %
+          (parse_stats['new_stations']))
+    print("Thermo measurements added:          %d" %
+          (parse_stats['station_thermo_contributions']))
+    print("Hydro measurements added:           %d" %
+          (parse_stats['station_hydro_contributions']))
+    print()
 
 
 def datetime_range(start_timestamp, end_timestamp, stepsize):
@@ -262,6 +302,16 @@ def datetime_to_file_name(timestamp):
     )
 
 
+def inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
+    """Whether a coordinate is inside a bounding box.
+
+    Given query point (lat, lon) considers whether point is indide the box
+    defined by top left point (tl_lat, tl_lon) and bottom right point
+    (br_lat, br_lon).
+    """
+    return lat >= br_lat and lat <= tl_lat and lon >= tl_lon and lon <= br_lon
+
+
 # TODO Really really slow. Works well for large amounts per station.
 def resample_and_interpolate(data_map, resolution=10):
     """Resample and interpolate a dictionary to pandas dataframe."""
@@ -276,7 +326,7 @@ def resample_and_interpolate(data_map, resolution=10):
             df = pd.DataFrame(station.thermo_module)
             df.set_index('valid_datetime', drop=True, inplace=True)
             interpolation_limit = 3 if resolution <= 20 else 0
-            df = df.resample(str(resolution) + 'T').interpolate(
+            df = df.resample(str(resolution) + 'T').mean().interpolate(
                 method='time',
                 limit=interpolation_limit
             )
