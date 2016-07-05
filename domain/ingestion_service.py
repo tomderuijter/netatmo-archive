@@ -1,4 +1,5 @@
 """Module for ingesting NetAtmo data into MongoDB."""
+import logging
 import multiprocessing as mp
 
 
@@ -6,138 +7,171 @@ class MultiProcessingTest(object):
     """Module for ingesting files from S3 into a MongoDB."""
 
     def __init__(self):
-        self.s3_connections = 2
-        self.db_connections = 2
+        self.s3_connections = mp.cpu_count()
+        self.db_connections = mp.cpu_count()
 
-        self.file_consumers = mp.cpu_count()
-        self.json_consumers = mp.cpu_count()
+        self.file_consumer_count = mp.cpu_count()
+        self.json_consumer_count = mp.cpu_count()
 
     def run(self, request):
-        print("Main thread: initializing ingestion process.")
-        file_queue = mp.JoinableQueue()
-        json_queue = mp.JoinableQueue()
+        """Download, ingest and upload files from S3 to MongoDB."""
+        logging.info("Main thread: initializing ingestion process.")
+        self._file_queue = mp.JoinableQueue()
+        self._json_queue = mp.JoinableQueue()
 
-        s3_semaphore = mp.BoundedSemaphore(self.s3_connections)
-        db_semaphore = mp.BoundedSemaphore(self.db_connections)
+        self._s3_semaphore = mp.BoundedSemaphore(self.s3_connections)
+        self._db_semaphore = mp.BoundedSemaphore(self.db_connections)
 
-        files_to_load = get_request_file_paths(request)
-        add_to_queue(file_queue, files_to_load)
-        add_to_queue(file_queue, [PoisonPill()] * self.file_consumers)
+        files_to_load = _get_request_file_paths(request)
+        logging.info(
+            "Main thread: %d files to download." %
+            len(files_to_load))
+        self._add_files_to_queue(files_to_load)
 
-        print("Main thread: starting worker processes.")
-        # TODO Move this into separate function
-        file_consumers = [
-            FileConsumer(s3_semaphore, file_queue, json_queue)
-            for x in range(self.file_consumers)]
-        for w in file_consumers:
-            w.start()
+        logging.info(
+            "Main thread: starting %d file loader processes." %
+            self.file_consumer_count)
+        self._start_file_consumers()
 
-        # TODO Move to separate function
-        json_consumers = [
-            JSONConsumer(db_semaphore, json_queue)
-            for x in range(self.json_consumers)]
-        for w in json_consumers:
-            w.start()
+        logging.info(
+            "Main thread: starting %d database ingestion processes." %
+            self.json_consumer_count)
+        self._start_json_consumers()
 
-        # Wait for file loading to finish, then decomission json consumers.
-        file_queue.close()
-        file_queue.join_thread()
-        add_to_queue(json_queue, [PoisonPill()] * self.json_consumers)
-        print("Main thread: downloading complete.")
-        json_queue.close()
-        json_queue.join_thread()
-        print("Main thread: database ingestion complete.")
+        self._stop_file_consumers()  # Blocking operation
+        logging.info("Main thread: downloading complete.")
+
+        self._stop_json_consumers()  # Blocking operation
+        logging.info("Main thread: database ingestion complete.")
+
+    def _add_files_to_queue(self, files_to_load):
+        _add_to_queue(self._file_queue, files_to_load)
+
+    def _start_file_consumers(self):
+        for _ in range(self.file_consumer_count):
+            FileConsumer(
+                self._s3_semaphore, self._file_queue, self._json_queue
+            ).start()
+
+    def _stop_file_consumers(self):
+        _add_to_queue(
+            self._file_queue,
+            [PoisonPill()] * self.file_consumer_count)
+        self._file_queue.close()
+        self._file_queue.join_thread()
+
+    def _start_json_consumers(self):
+        for _ in range(self.json_consumer_count):
+            JSONConsumer(self._db_semaphore, self._json_queue).start()
+
+    def _stop_json_consumers(self):
+        _add_to_queue(
+            self._json_queue,
+            [PoisonPill()] * self.json_consumer_count)
+        self._json_queue.close()
+        self._json_queue.join_thread()
 
 
 class FileConsumer(mp.Process):
     """Consumer process for loading and parsing files from S3."""
 
-    def __init__(self, file_semaphore, file_queue, result_queue):
+    def __init__(self, s3_semaphore, input_queue, output_queue):
         super().__init__()
-        self.file_semaphore = file_semaphore
-        self.file_queue = file_queue
-        self.result_queue = result_queue
+        self.s3_semaphore = s3_semaphore
+        self.input_queue = input_queue
+        self.output_queue = output_queue
 
     def run(self):
-        print("%s: starting." % self.name)
+        logging.info("%s: starting." % self.name)
         while True:
-            next_task = self.file_queue.get()
+            next_task = self.input_queue.get()
             if isinstance(next_task, PoisonPill):
-                print("%s: exiting." % self.name)
-                self.file_queue.task_done()
+                logging.info("%s: exiting." % self.name)
+                self.input_queue.task_done()
                 break
 
             file_contents = None
-            with self.file_semaphore:
-                print("%s: downloading file from S3." % self.name)
-                file_contents = download_from_S3(next_task)
+            with self.s3_semaphore:
+                logging.info("%s: downloading file from S3." % self.name)
+                file_contents = _download_from_S3(next_task)
             assert file_contents is not None
 
-            station_mapping = map_to_station_objects(file_contents)
+            station_mapping = _json_to_station_objects(file_contents)
 
-            print("%s: finished task." % self.name)
-            self.file_queue.task_done()
-            self.result_queue.put(station_mapping)
+            logging.info("%s: finished task." % self.name)
+            self.input_queue.task_done()
+            self.output_queue.put(station_mapping)
         return
 
 
 class JSONConsumer(mp.Process):
-    """Consumer process for pushing objects into MongoDB."""
+    """Consumer process for pushing station objects into MongoDB."""
 
-    def __init__(self, db_semaphore, json_queue):
+    def __init__(self, db_semaphore, input_queue):
         super().__init__()
         self.db_semaphore = db_semaphore
-        self.json_queue = json_queue
+        self.input_queue = input_queue
 
     def run(self):
-        print("%s: starting." % self.name)
+        """"""
+        logging.info("%s: starting." % self.name)
         while True:
-            next_task = self.json_queue.get()
+            next_task = self.input_queue.get()
             if isinstance(next_task, PoisonPill):
-                print("%s: exiting." % self.name)
-                self.json_queue.task_done()
+                logging.info("%s: exiting." % self.name)
+                self.input_queue.task_done()
                 break
 
             with self.db_semaphore:
-                print("%s: opening database connection." % self.name)
-                # Make database connection.
-                # For new stations in task: insert.
-                # For existing stations in task:
-                #   append measurements.
-                #   if possible, insert measurements at specific place to
-                #     enfore sorted time series.
-                #   overwrite coordinates if changed
-                # TODO
-            print("%s: finished task." % self.name)
-            self.json_queue.task_done()
+                logging.info("%s: opening database connection." % self.name)
+                _store_stations_in_database(next_task)
+            logging.info("%s: finished task." % self.name)
+            self.input_queue.task_done()
         return
 
 
 class PoisonPill(object):
-    """Construct to signal a process to stop."""
+    """Object equivalent of SIGTERM."""
 
 
-def get_request_file_paths(request):
+def _get_request_file_paths(request):
     # TODO
     return range(10)
 
 
-def add_to_queue(queue, tasks):
+def _add_to_queue(queue, tasks):
     for task in tasks:
         queue.put(task)
 
 
-def download_from_S3(file_path):
+def _download_from_S3(file_path):
     # TODO
     return "Lorem ipsum dolor sit amet."
 
 
-def map_to_station_objects(json_string):
+def _json_to_station_objects(json_string):
     # TODO
     return "Foo"
 
 
+def _store_stations_in_database(station_dict):
+    # Make database connection.
+    # For new stations in task: insert.
+    # For existing stations in task:
+    #   append measurements.
+    #   if possible, insert measurements at specific place to
+    #     enfore sorted time series.
+    #   overwrite coordinates if changed
+    # Close database connection
+    # TODO
+    pass
+
+
 if __name__ == "__main__":
+    logging.basicConfig(
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        level='INFO'
+    )
     request = None
     main_thread = MultiProcessingTest()
     main_thread.run(request)
