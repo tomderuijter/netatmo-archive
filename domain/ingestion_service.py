@@ -13,6 +13,11 @@ class MultiProcessingTest(object):
         self.file_consumer_count = mp.cpu_count()
         self.json_consumer_count = mp.cpu_count()
 
+        self._file_queue = None
+        self._json_queue = None
+        self._s3_semaphore = None
+        self._db_semaphore = None
+
     def run(self, request):
         """Download, ingest and upload files from S3 to MongoDB."""
         logging.info("Main thread: initializing ingestion process.")
@@ -90,7 +95,6 @@ class FileConsumer(mp.Process):
                 self.input_queue.task_done()
                 break
 
-            file_contents = None
             with self.s3_semaphore:
                 logging.info("%s: downloading file from S3." % self.name)
                 file_contents = _download_from_S3(next_task)
@@ -113,7 +117,7 @@ class JSONConsumer(mp.Process):
         self.input_queue = input_queue
 
     def run(self):
-        """"""
+        """Push object mapping into MongoDB."""
         logging.info("%s: starting." % self.name)
         while True:
             next_task = self.input_queue.get()
@@ -172,6 +176,6 @@ if __name__ == "__main__":
         format='%(asctime)s - %(levelname)s - %(message)s',
         level='INFO'
     )
-    request = None
+    test_request = None
     main_thread = MultiProcessingTest()
-    main_thread.run(request)
+    main_thread.run(test_request)

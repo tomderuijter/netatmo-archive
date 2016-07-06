@@ -4,6 +4,9 @@ obs/
 config/
 mongod/
 
+# IDEA
+.idea/
+
 # OS Temporary files
 .DS_Store
 
