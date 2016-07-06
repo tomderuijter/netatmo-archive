@@ -1,5 +1,6 @@
 from datetime import datetime
 from numpy import nan
+import logging
 
 # User modules
 from domain.base import Station
@@ -143,18 +144,15 @@ def _is_inside_box(lat, lon, tl_lat, tl_lon, br_lat, br_lon):
 
 def log_parse_stats(parse_stats):
     # Ingestion logging.
-    print("Total number of stations:           %d" %
+    logging.debug("Total number of stations:           %d" %
           (parse_stats['station_count']))
-    print("Points in file:                     %d" %
+    logging.debug("Points in file:                     %d" %
           (parse_stats['stations_in_file']))
-    print("Points out of region:               %d" %
+    logging.debug("Points out of region:               %d" %
           (parse_stats['stations_out_of_region']))
-    # print("Points ignored:                     %d" %
-    #   (len(json_data) - out_of_region - station_contributions))
-    print("New stations:                       %d" %
+    logging.debug("New stations:                       %d" %
           (parse_stats['new_stations']))
-    print("Thermo measurements added:          %d" %
+    logging.debug("Thermo measurements added:          %d" %
           (parse_stats['station_thermo_contributions']))
-    print("Hydro measurements added:           %d" %
+    logging.debug("Hydro measurements added:           %d" %
           (parse_stats['station_hydro_contributions']))
-    print()

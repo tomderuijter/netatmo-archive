@@ -55,9 +55,7 @@ def query(root_directory, request):
     # Initialize data objects
     data_map = {}
 
-    # Select all possible dates of interest
     request_file_names = list_requested_files(request)
-
     existing_files = ls_json(root_directory)
 
     # Load request files

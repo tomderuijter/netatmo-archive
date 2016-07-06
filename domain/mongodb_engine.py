@@ -3,35 +3,72 @@ import pymongo
 from domain.base import Station
 
 
-class MongoDBConnector():
+class MongoDBConnector(object):
     """Connector class for reading and writing NetAtmo data."""
 
     def __init__(self):
-        # TODO Throw error if module fails
-        self.db = pymongo.MongoClient().netatmo
+        self._client = pymongo.MongoClient()
+        self.db = self._client.netatmo
 
-    def write_station(self, station):
+    def close(self):
+        self._client.close()
+
+    def upsert_stations(self, station_dict):
+        # TODO Add configurable bulk size.
+        bulk = self.db.stations.initialize_unordered_bulk_op()
+        for station_id in station_dict:
+            station = station_dict[station_id]
+            query = {'station_id': station_id}
+            # print(station.__dict__)
+            update = _construct_station_upsert_query(station)
+            # print(update)
+            # print('--')
+            # self.db.stations.update(query, update, True)
+            bulk.find(query).upsert().update(update)
+        bulk.execute()
+
+    def insert_station(self, station):
         assert isinstance(station, Station)
-        self.db.stations.insert_one(station.__dict__)
+        station_dict = station.__dict__
+        _add_primary_key(station_dict)
+        self.db.stations.insert_one(station_dict)
 
     def get_station(self, station_id):
         self.db.stations.find_one({'station_id': station_id})
 
-    def update_station(self, station):
-        # TODO
-        pass
 
-    def delete_station(self, station):
-        # TODO
-        pass
+def _add_primary_key(station_dict):
+    station_dict['_id'] = station_dict['station_id']
 
-    def find_nearby_stations(self, point, radius):
-        latitude, longitude = point
-        # TODO
-        pass
 
-    def find_stations_in_box(top_left_point, bottom_right_point):
-        left_latitude, top_longitude = top_left_point
-        right_latitude, bottom_longitude = bottom_right_point
-        # TODO
-        pass
+def _construct_station_upsert_query(station):
+    update = {
+        '$setOnInsert': {
+            'station_id': station.station_id,
+            'elevation': station.elevation,
+            'latitude': station.latitude,
+            'longitude': station.longitude
+        },
+        '$push': {}
+    }
+
+    if station.hydro_module is not None:
+        update['$push']['hydro_module.time_day_rain'] = {'$each': station.hydro_module['time_day_rain']}
+        update['$push']['hydro_module.time_hour_rain'] = {'$each': station.hydro_module['time_hour_rain']}
+        update['$push']['hydro_module.daily_rain_sum'] = {'$each': station.hydro_module['daily_rain_sum']}
+        update['$push']['hydro_module.hourly_rain_sum'] = {'$each': station.hydro_module['hourly_rain_sum']}
+    else:
+        update['$setOnInsert']['hydro_module'] = None
+
+    if station.thermo_module is not None:
+        update['$push']['thermo_module.humidity'] = {'$each': station.thermo_module['humidity']}
+        update['$push']['thermo_module.pressure'] = {'$each': station.thermo_module['pressure']}
+        update['$push']['thermo_module.temperature'] = {'$each': station.thermo_module['temperature']}
+        update['$push']['thermo_module.valid_datetime'] = {'$each': station.thermo_module['valid_datetime']}
+    else:
+        update['$setOnInsert']['thermo_module'] = None
+
+    if update['$push'] == {}:
+        del update['$push']
+
+    return update
