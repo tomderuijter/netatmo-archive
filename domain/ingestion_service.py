@@ -1,7 +1,9 @@
 """Module for ingesting NetAtmo data into MongoDB."""
+import math
 import logging
 import multiprocessing as mp
 from datetime import datetime
+from time import sleep
 
 # User modules
 from domain.json_parser import parse_stations, log_parse_stats
@@ -15,10 +17,10 @@ class MultiProcessingTest(object):
     """Module for ingesting files from S3 into a MongoDB."""
 
     def __init__(self):
-        self.s3_connections = 4  # mp.cpu_count()
+        self.s3_connections = 2  # mp.cpu_count()
         self.db_connections = 4  # mp.cpu_count()
 
-        self.file_consumer_count = 4  # mp.cpu_count()
+        self.file_consumer_count = 2  # mp.cpu_count()
         self.json_consumer_count = 4  # mp.cpu_count()
 
         self._file_queue = None
@@ -45,15 +47,26 @@ class MultiProcessingTest(object):
             "Main thread: starting %d file loader processes." %
             self.file_consumer_count)
         self._start_file_consumers(request)
+        logging.info("Main thread: all tasks listed in file queue.")
+        logging.info("Main thread: queueing poison pills for file loaders.")
+        self._close_file_queue()
 
         logging.info(
             "Main thread: starting %d database ingestion processes." %
             self.json_consumer_count)
         self._start_json_consumers()
 
-        self._stop_file_consumers()  # Blocking operation
+        # Wait for file queue to be empty, so that all ingestion tasks are queued.
+        self._file_queue.join()  # Block main thread
         logging.info("Main thread: downloading complete.")
-        self._stop_json_consumers()  # Blocking operation
+        logging.info("Main thread: all ingestion tasks posted.")
+
+        # Wait for existing json tasks to finish before closing the queue.
+        # This ensures json consumers are not stopped prematurely.
+        self._json_queue.join()  # Blocking operation
+        logging.info("Main thread: queueing poison pills for database ingesters.")
+        # Shouldn't be called until the json_queue is completely empty.
+        self._close_json_queue()
         logging.info("Main thread: database ingestion complete.")
 
     def _add_files_to_queue(self, files_to_load):
@@ -65,25 +78,23 @@ class MultiProcessingTest(object):
                 self._s3_semaphore, self._file_queue, self._json_queue, request
             ).start()
 
-    def _stop_file_consumers(self):
+    def _close_file_queue(self):
         _add_to_queue(
             self._file_queue,
-            [PoisonPill()] * self.file_consumer_count)
+            [PoisonPill(x + 1000) for x in range(self.file_consumer_count)])
         self._file_queue.close()
         self._file_queue.join_thread()
-        self._file_queue.join()
 
     def _start_json_consumers(self):
         for _ in range(self.json_consumer_count):
             JSONConsumer(self._db_semaphore, self._json_queue).start()
 
-    def _stop_json_consumers(self):
+    def _close_json_queue(self):
         _add_to_queue(
             self._json_queue,
-            [PoisonPill()] * self.json_consumer_count)
+            [PoisonPill(x) for x in range(self.json_consumer_count)])
         self._json_queue.close()
         self._json_queue.join_thread()
-        self._json_queue.join()
 
 
 class FileConsumer(mp.Process):
@@ -101,7 +112,7 @@ class FileConsumer(mp.Process):
         while True:
             next_task = self.input_queue.get()
             if isinstance(next_task, PoisonPill):
-                logging.info("%s: exiting." % self.name)
+                logging.info("%s: encountered %s. Exiting." % (self.name, next_task))
                 self.input_queue.task_done()
                 break
 
@@ -115,7 +126,12 @@ class FileConsumer(mp.Process):
             logging.debug("%s: %d stations in file." % (self.name, len(station_mapping)))
             logging.info("%s: finished task." % self.name)
             self.input_queue.task_done()
-            self.output_queue.put(station_mapping)
+
+            # Split dictionary in chunks for distributed ingestion
+            station_mapping_parts = _split_dictionary(station_mapping)
+            # TODO TdR 06/07/16: Debug _split_dictionary.
+            _add_to_queue(self.output_queue, station_mapping_parts)
+            logging.info('%s: placed %d tasks on output queue.' % (self.name, len(station_mapping_parts)))
         return
 
 
@@ -132,8 +148,9 @@ class JSONConsumer(mp.Process):
         logging.info("%s: starting." % self.name)
         while True:
             next_task = self.input_queue.get()
+            print("%s: selected task type %s" % (self.name, type(next_task)))
             if isinstance(next_task, PoisonPill):
-                logging.info("%s: exiting." % self.name)
+                logging.info("%s: encountered %s. Exiting." % (self.name, next_task))
                 self.input_queue.task_done()
                 break
 
@@ -148,6 +165,11 @@ class JSONConsumer(mp.Process):
 
 class PoisonPill(object):
     """Object equivalent of SIGTERM."""
+    def __init__(self, number):
+        self.identifier = number
+
+    def __str__(self):
+        return 'PoisonPill-%d' % self.identifier
 
 
 def _get_request_file_paths(request):
@@ -177,6 +199,18 @@ def _store_stations_in_database(station_dict):
     db_connector.close()
 
 
+# TODO TdR 06/07/16: Test
+def _split_dictionary(whole_dict, chunk_size=5000):
+    chunk_generator = _chunks(list(whole_dict.items()), chunk_size)
+    return [dict(chunk) for chunk in chunk_generator]
+
+
+def _chunks(l, n):
+    """Yield successive n-sized chunks from l."""
+    for i in range(0, len(l), n):
+        yield l[i:i+n]
+
+
 if __name__ == "__main__":
     logging.basicConfig(
         format='%(asctime)s - %(levelname)s - %(message)s',
@@ -190,7 +224,7 @@ if __name__ == "__main__":
     # Defining a request for the Netherlands
     test_request = DataRequest()
     start_dt = datetime(2016, 4, 1, 00, 00)
-    end_dt = datetime(2016, 4, 2, 00, 00)
+    end_dt = datetime(2016, 4, 1, 00, 00)
     test_request.start_datetime = start_dt
     test_request.end_datetime = end_dt
     test_request.time_resolution = 10
