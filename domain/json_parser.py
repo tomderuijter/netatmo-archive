@@ -79,14 +79,6 @@ def parse_station_hydro_data(station_data, station):
 
     # TODO 30-06-2016 TdR: Simple duplicate detection of records.
 
-    if station.hydro_module is None:
-        station.hydro_module = {
-            'time_day_rain': [],
-            'time_hour_rain': [],
-            'daily_rain_sum': [],
-            'hourly_rain_sum': []
-        }
-
     station.hydro_module['time_day_rain'].append(time_day_rain)
     station.hydro_module['time_hour_rain'].append(time_hour_rain)
     _add_value(station_data, 'Rain', station.hydro_module,
@@ -110,17 +102,9 @@ def parse_station_thermo_data(station_data, station):
     valid_datetime = datetime.utcfromtimestamp(station_data['time_utc'])
 
     # Simple duplicate detection
-    if station.thermo_module is not None and \
+    if station.thermo_module['valid_datetime'] != [] and \
        station.thermo_module['valid_datetime'][-1] == valid_datetime:
         return False
-
-    if station.thermo_module is None:
-        station.thermo_module = {
-            'valid_datetime': [],
-            'temperature': [],
-            'humidity': [],
-            'pressure': []
-        }
 
     station.thermo_module['valid_datetime'].append(valid_datetime)
     _add_value(station_data, 'Temperature', station.thermo_module,

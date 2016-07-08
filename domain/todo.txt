@@ -1,0 +1,10 @@
+# Features to add before production
+
+Store objects directly as Station objects.
+Handle no-such-file exceptions when downloading from S3.
+Handle socket time-out exceptions.
+Add geo-spatial index for search from MongoDB.
+Add geo-spatial sharding for MongoDB.
+Add process error queues for exception handling in multi-processing ingestion in ingestion_service.py.
+Handle multi-process exceptions in ingestion_service.py.
+

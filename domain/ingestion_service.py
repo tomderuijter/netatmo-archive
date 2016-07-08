@@ -3,7 +3,7 @@ import math
 import logging
 import multiprocessing as mp
 from datetime import datetime
-from time import sleep
+from time import time
 
 # User modules
 from domain.json_parser import parse_stations, log_parse_stats
@@ -17,11 +17,14 @@ class MultiProcessingTest(object):
     """Module for ingesting files from S3 into a MongoDB."""
 
     def __init__(self):
-        self.s3_connections = 2  # mp.cpu_count()
-        self.db_connections = 4  # mp.cpu_count()
+        # While concurrent writing is in theory not faster, a small number of
+        # threads yield a small write performance increase.
 
-        self.file_consumer_count = 2  # mp.cpu_count()
-        self.json_consumer_count = 4  # mp.cpu_count()
+        self.s3_connections = 3
+        self.db_connections = 4
+
+        self.file_consumer_count = 3
+        self.json_consumer_count = 4
 
         self._file_queue = None
         self._json_queue = None
@@ -75,7 +78,7 @@ class MultiProcessingTest(object):
     def _start_file_consumers(self, request):
         for _ in range(self.file_consumer_count):
             FileConsumer(
-                self._s3_semaphore, self._file_queue, self._json_queue, request
+                self._s3_semaphore, self._file_queue, self._json_queue, request, self.json_consumer_count
             ).start()
 
     def _close_file_queue(self):
@@ -100,12 +103,13 @@ class MultiProcessingTest(object):
 class FileConsumer(mp.Process):
     """Consumer process for loading and parsing files from S3."""
 
-    def __init__(self, s3_semaphore, input_queue, output_queue, request):
+    def __init__(self, s3_semaphore, input_queue, output_queue, request, worker_count):
         super().__init__()
         self.s3_semaphore = s3_semaphore
         self.input_queue = input_queue
         self.output_queue = output_queue
         self.request = request
+        self.worker_count = worker_count
 
     def run(self):
         logging.info("%s: starting." % self.name)
@@ -123,15 +127,17 @@ class FileConsumer(mp.Process):
             assert file_contents is not None
 
             station_mapping = _json_to_station_objects(file_contents, self.request.region)
-            logging.debug("%s: %d stations in file." % (self.name, len(station_mapping)))
             logging.info("%s: finished task." % self.name)
             self.input_queue.task_done()
 
             # Split dictionary in chunks for distributed ingestion
-            station_mapping_parts = _split_dictionary(station_mapping)
+            minimum_chunk_size = 20000
+            chunk_size = max(int(math.ceil(len(station_mapping) / self.worker_count)), minimum_chunk_size)
+            station_mapping_parts = _split_dictionary(station_mapping, chunk_size)
             # TODO TdR 06/07/16: Debug _split_dictionary.
             _add_to_queue(self.output_queue, station_mapping_parts)
-            logging.info('%s: placed %d tasks on output queue.' % (self.name, len(station_mapping_parts)))
+            logging.info('%s: placed %d stations in %d tasks on output queue.' %
+                         (self.name, len(station_mapping), len(station_mapping_parts)))
         return
 
 
@@ -148,7 +154,6 @@ class JSONConsumer(mp.Process):
         logging.info("%s: starting." % self.name)
         while True:
             next_task = self.input_queue.get()
-            print("%s: selected task type %s" % (self.name, type(next_task)))
             if isinstance(next_task, PoisonPill):
                 logging.info("%s: encountered %s. Exiting." % (self.name, next_task))
                 self.input_queue.task_done()
@@ -200,7 +205,7 @@ def _store_stations_in_database(station_dict):
 
 
 # TODO TdR 06/07/16: Test
-def _split_dictionary(whole_dict, chunk_size=5000):
+def _split_dictionary(whole_dict, chunk_size=2500):
     chunk_generator = _chunks(list(whole_dict.items()), chunk_size)
     return [dict(chunk) for chunk in chunk_generator]
 
@@ -219,16 +224,17 @@ if __name__ == "__main__":
 
     import os
     os.chdir('../')
-    print(os.getcwd())
 
+    program_start = time()
     # Defining a request for the Netherlands
     test_request = DataRequest()
-    start_dt = datetime(2016, 4, 1, 00, 00)
-    end_dt = datetime(2016, 4, 1, 00, 00)
+    start_dt = datetime(2016, 4, 1, 0, 0)
+    end_dt = datetime(2016, 4, 1, 4, 0)
+    # end_dt = datetime(2016, 4, 1, 0, 50)  # Time of error.
     test_request.start_datetime = start_dt
     test_request.end_datetime = end_dt
     test_request.time_resolution = 10
-    # test_request.region = (52.000, 4.790, 51.880, 5.080)
-    test_request.region = (53.680, 2.865, 50.740, 7.323)
     main_thread = MultiProcessingTest()
     main_thread.run(test_request)
+    program_end = time()
+    logging.info('Program finished (%ds).' % (program_end - program_start))

@@ -30,9 +30,19 @@ class Station(object):
         self.longitude = lon
         self.elevation = None
 
-        self.thermo_module = None
-        self.hydro_module = None
+        self.thermo_module = {
+            'valid_datetime': [],
+            'temperature': [],
+            'humidity': [],
+            'pressure': []
+        }
 
+        self.hydro_module = {
+            'time_day_rain': [],
+            'time_hour_rain': [],
+            'daily_rain_sum': [],
+            'hourly_rain_sum': []
+        }
     @classmethod
     def fromdict(cls, d):
         station_id = d['station_id']

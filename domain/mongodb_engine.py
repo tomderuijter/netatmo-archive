@@ -7,24 +7,25 @@ class MongoDBConnector(object):
     """Connector class for reading and writing NetAtmo data."""
 
     def __init__(self):
-        self._client = pymongo.MongoClient()
+        # Write concern describes the level of acknowledgement
+        # requested from MongoDB for write operations. Turning it
+        # off may result in performance increase for write operations.
+        # This comes at the cost of error reporting.
+        write_concern = 1
+        self._client = pymongo.MongoClient(w=write_concern)
         self.db = self._client.netatmo
 
     def close(self):
         self._client.close()
 
     def upsert_stations(self, station_dict):
-        # TODO Add configurable bulk size.
         bulk = self.db.stations.initialize_unordered_bulk_op()
         for station_id in station_dict:
             station = station_dict[station_id]
-            query = {'station_id': station_id}
-            # print(station.__dict__)
+            query = {'_id': station_id}
             update = _construct_station_upsert_query(station)
-            # print(update)
-            # print('--')
-            # self.db.stations.update(query, update, True)
             bulk.find(query).upsert().update(update)
+            # self.db.stations.update(query, update, True)
         bulk.execute()
 
     def insert_station(self, station):
@@ -34,7 +35,13 @@ class MongoDBConnector(object):
         self.db.stations.insert_one(station_dict)
 
     def get_station(self, station_id):
-        self.db.stations.find_one({'station_id': station_id})
+        return self.db.stations.find_one({'station_id': station_id})
+
+    def get_all_station_locations(self):
+        return self.db.stations.find(
+            {},
+            {'_id': 0, 'station_id': 1, 'latitude': 1, 'longitude': 1, 'elevation': 1}
+        )
 
 
 def _add_primary_key(station_dict):
@@ -44,7 +51,7 @@ def _add_primary_key(station_dict):
 def _construct_station_upsert_query(station):
     update = {
         '$setOnInsert': {
-            'station_id': station.station_id,
+            '_id': station.station_id,
             'elevation': station.elevation,
             'latitude': station.latitude,
             'longitude': station.longitude
