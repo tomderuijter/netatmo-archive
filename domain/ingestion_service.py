@@ -17,13 +17,15 @@ class MultiProcessingTest(object):
     """Module for ingesting files from S3 into a MongoDB."""
 
     def __init__(self):
+
+        self.s3_connections = 2
+        # The maximum number of s3 connections depend on the clients bandwidth
+        # to the AWS servers.
+        self.db_connections = 4
         # While concurrent writing is in theory not faster, a small number of
         # threads yield a small write performance increase.
 
-        self.s3_connections = 3
-        self.db_connections = 4
-
-        self.file_consumer_count = 3
+        self.file_consumer_count = 2
         self.json_consumer_count = 4
 
         self._file_queue = None
