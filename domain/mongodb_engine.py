@@ -1,5 +1,8 @@
 """Module for communicating with MongoDB."""
 import pymongo
+from bson.binary import Binary
+
+# User modules
 from domain.base import Station
 
 
@@ -14,6 +17,8 @@ class MongoDBConnector(object):
         write_concern = 1
         self._client = pymongo.MongoClient(w=write_concern)
         self.db = self._client.netatmo
+        # TODO TdR 08/07/16: Objects are not yet pushed in as stations.
+        self.db.add_son_manipulator(BinaryTransformer())
 
     def close(self):
         self._client.close()
@@ -28,16 +33,7 @@ class MongoDBConnector(object):
             # self.db.stations.update(query, update, True)
         bulk.execute()
 
-    def insert_station(self, station):
-        assert isinstance(station, Station)
-        station_dict = station.__dict__
-        _add_primary_key(station_dict)
-        self.db.stations.insert_one(station_dict)
-
-    def get_station(self, station_id):
-        return self.db.stations.find_one({'station_id': station_id})
-
-    def get_all_station_locations(self):
+    def get_station_locations(self):
         return self.db.stations.find(
             {},
             {'_id': 0, 'station_id': 1, 'latitude': 1, 'longitude': 1, 'elevation': 1}
@@ -79,3 +75,22 @@ def _construct_station_upsert_query(station):
         del update['$push']
 
     return update
+
+
+class BinaryTransformer(pymongo.son_manipulator.SONManipulator):
+
+    def transform_incoming(self, son, collection):
+        for (key, value) in son.items():
+            if isinstance(value, Station):
+                son[key] = value.to_binary(value)
+            elif isinstance(value, dict):
+                son[key] = self.transform_incoming(value, collection)
+        return son
+
+    def transform_outgoing(self, son, collection):
+        for (key, value) in son.items():
+            if isinstance(value, Binary) and value.subtype == Station.binary_subtype:
+                son[key] = Station.from_binary(value)
+            elif isinstance(value, dict):
+                son[key] = self.transform_outgoing(value, collection)
+        return son

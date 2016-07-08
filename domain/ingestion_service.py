@@ -13,7 +13,7 @@ from domain.base import DataRequest
 from domain.mongodb_engine import MongoDBConnector
 
 
-class MultiProcessingTest(object):
+class IngestionService(object):
     """Module for ingesting files from S3 into a MongoDB."""
 
     def __init__(self):
@@ -226,17 +226,16 @@ if __name__ == "__main__":
 
     import os
     os.chdir('../')
+    print(os.getcwd())
 
     program_start = time()
-    # Defining a request for the Netherlands
     test_request = DataRequest()
-    start_dt = datetime(2016, 4, 1, 0, 0)
-    end_dt = datetime(2016, 4, 1, 4, 0)
-    # end_dt = datetime(2016, 4, 1, 0, 50)  # Time of error.
+    start_dt = datetime(2016, 4, 1, 0, 50)
+    end_dt = datetime(2016, 4, 1, 0, 50)
     test_request.start_datetime = start_dt
     test_request.end_datetime = end_dt
     test_request.time_resolution = 10
-    main_thread = MultiProcessingTest()
+    main_thread = IngestionService()
     main_thread.run(test_request)
     program_end = time()
     logging.info('Program finished (%ds).' % (program_end - program_start))

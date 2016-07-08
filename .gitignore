@@ -3,6 +3,7 @@ data/
 obs/
 config/
 mongod/
+mongodb/
 
 # IDEA
 .idea/

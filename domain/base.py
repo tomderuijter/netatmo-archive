@@ -1,4 +1,5 @@
 """Module with base objects for NetAtmo data processing."""
+from bson.binary import Binary
 
 
 class DataRequest(object):
@@ -24,6 +25,8 @@ class DataResponse(object):
 
 class Station(object):
 
+    binary_subtype = 128
+
     def __init__(self, station_id, lat, lon):
         self.station_id = station_id
         self.latitude = lat
@@ -43,9 +46,10 @@ class Station(object):
             'daily_rain_sum': [],
             'hourly_rain_sum': []
         }
+
     @classmethod
-    def fromdict(cls, d):
-        station_id = d['station_id']
+    def from_dict(cls, d):
+        station_id = d['_id']
         latitude = d['latitude']
         longitude = d['longitude']
         station = Station(station_id, latitude, longitude)
@@ -53,3 +57,15 @@ class Station(object):
         station.thermo_module = d['thermo_module']
         station.hydro_module = d['hydro_module']
         return station
+
+    def to_binary(self):
+        # TODO TdR 08/07/16: Implement
+        yield NotImplementedError(self)
+        # return Binary(str(self), Station.binary_subtype)
+
+    @classmethod
+    def from_binary(cls, binary):
+        # TODO TdR 08/07/16: Implement
+        yield NotImplementedError()
+        # return Station(int(binary))
+
