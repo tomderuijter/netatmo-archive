@@ -3,7 +3,8 @@ import math
 import logging
 import multiprocessing as mp
 from datetime import datetime
-from time import time
+from time import time, sleep
+import botocore
 
 # User modules
 from domain.json_parser import parse_stations, log_parse_stats
@@ -30,6 +31,7 @@ class IngestionService(object):
 
         self._file_queue = None
         self._json_queue = None
+        self._error_queue = None
         self._s3_semaphore = None
         self._db_semaphore = None
 
@@ -38,6 +40,7 @@ class IngestionService(object):
         logging.info("Main thread: initializing ingestion process.")
         self._file_queue = mp.JoinableQueue()
         self._json_queue = mp.JoinableQueue()
+        self._error_queue = mp.SimpleQueue()
 
         self._s3_semaphore = mp.BoundedSemaphore(self.s3_connections)
         self._db_semaphore = mp.BoundedSemaphore(self.db_connections)
@@ -74,13 +77,17 @@ class IngestionService(object):
         self._close_json_queue()
         logging.info("Main thread: database ingestion complete.")
 
+        # TODO TdR 18/07/16: do something with error queue contents.
+
     def _add_files_to_queue(self, files_to_load):
         _add_to_queue(self._file_queue, files_to_load)
 
     def _start_file_consumers(self, request):
         for _ in range(self.file_consumer_count):
             FileConsumer(
-                self._s3_semaphore, self._file_queue, self._json_queue, request, self.json_consumer_count
+                self._s3_semaphore,
+                self._file_queue, self._json_queue, self._error_queue,
+                request, self.json_consumer_count
             ).start()
 
     def _close_file_queue(self):
@@ -92,7 +99,7 @@ class IngestionService(object):
 
     def _start_json_consumers(self):
         for _ in range(self.json_consumer_count):
-            JSONConsumer(self._db_semaphore, self._json_queue).start()
+            JSONConsumer(self._db_semaphore, self._json_queue, self._error_queue).start()
 
     def _close_json_queue(self):
         _add_to_queue(
@@ -105,11 +112,12 @@ class IngestionService(object):
 class FileConsumer(mp.Process):
     """Consumer process for loading and parsing files from S3."""
 
-    def __init__(self, s3_semaphore, input_queue, output_queue, request, worker_count):
+    def __init__(self, s3_semaphore, input_queue, output_queue, error_queue, request, worker_count):
         super().__init__()
         self.s3_semaphore = s3_semaphore
         self.input_queue = input_queue
         self.output_queue = output_queue
+        self.error_queue = error_queue
         self.request = request
         self.worker_count = worker_count
 
@@ -124,9 +132,24 @@ class FileConsumer(mp.Process):
 
             with self.s3_semaphore:
                 logging.info("%s: downloading file S3://%s" % (self.name, next_task))
-                # TODO do catch error if file is not found.
-                file_contents = _download_from_s3(next_task)
-            assert file_contents is not None
+                try:
+                    file_contents = _download_from_s3(next_task)
+                except botocore.exceptions.EndpointConnectionError as e:
+                    error_msg = "%s: network error. Could not download file %s." % (self.name, next_task)
+                    logging.error(error_msg)
+                    self.error_queue.put((error_msg, e))
+                    self.input_queue.task_done()
+                    continue
+                except botocore.exceptions.ClientError as e:
+                    if e.response['Error']['Code'] == 'NoSuchKey':
+                        # File does not exist on Amazon side.
+                        error_msg = "%s: file '%s' does not exist. Continuing." % (self.name, next_task)
+                        logging.error(error_msg)
+                        self.error_queue.put((error_msg, e))
+                        self.input_queue.task_done()
+                        continue
+                    else:
+                        raise
 
             station_mapping = _json_to_station_objects(file_contents, self.request.region)
             logging.info("%s: finished task." % self.name)
@@ -146,10 +169,11 @@ class FileConsumer(mp.Process):
 class JSONConsumer(mp.Process):
     """Consumer process for pushing station objects into MongoDB."""
 
-    def __init__(self, db_semaphore, input_queue):
+    def __init__(self, db_semaphore, input_queue, error_queue):
         super().__init__()
         self.db_semaphore = db_semaphore
         self.input_queue = input_queue
+        self.error_queue = error_queue
 
     def run(self):
         """Push object mapping into MongoDB."""
@@ -189,8 +213,19 @@ def _add_to_queue(queue, tasks):
 
 
 def _download_from_s3(file_path):
+    attempts = 0
     aws_keys = load_aws_keys()
-    return load_file_aws(file_path, aws_keys)
+    while True:
+        try:
+            file_contents = load_file_aws(file_path, aws_keys)
+            return file_contents
+        except botocore.exceptions.EndpointConnectionError:
+            if attempts < 3:
+                logging.error("Connection failure while downloading %s. Trying again in 10 seconds." % file_path)
+                attempts += 1
+                sleep(10)
+            else:
+                raise
 
 
 def _json_to_station_objects(json_object, region):
@@ -228,13 +263,12 @@ if __name__ == "__main__":
     os.chdir('../')
     print(os.getcwd())
 
-    program_start = time()
     test_request = DataRequest()
-    start_dt = datetime(2016, 4, 1, 0, 50)
-    end_dt = datetime(2016, 4, 1, 0, 50)
-    test_request.start_datetime = start_dt
-    test_request.end_datetime = end_dt
+    test_request.start_datetime = datetime(2016, 4, 1, 0, 0)
+    test_request.end_datetime = datetime(2016, 5, 1, 0, 0)
     test_request.time_resolution = 10
+
+    program_start = time()
     main_thread = IngestionService()
     main_thread.run(test_request)
     program_end = time()
