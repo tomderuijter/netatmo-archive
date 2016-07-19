@@ -38,8 +38,11 @@ class IngestionService(object):
     def run(self, request):
         """Download, ingest and upload files from S3 to MongoDB."""
         logging.info("Main thread: initializing ingestion process.")
+        # All files are queued at the same time. No limit required.
         self._file_queue = mp.JoinableQueue()
-        self._json_queue = mp.JoinableQueue()
+        # Once a file is downloaded, it is split up and put on the json queue.
+        # Limiting the json queue is required to match download speed with ingestion speed.
+        self._json_queue = mp.JoinableQueue(mp.cpu_count() * 2)
         self._error_queue = mp.SimpleQueue()
 
         self._s3_semaphore = mp.BoundedSemaphore(self.s3_connections)
@@ -220,13 +223,12 @@ def _download_from_s3(file_path):
             file_contents = load_file_aws(file_path, aws_keys)
             return file_contents
         except botocore.exceptions.EndpointConnectionError:
-            if attempts < 3:
+            # if attempts < 3:
                 logging.error("Connection failure while downloading %s. Trying again in 10 seconds." % file_path)
                 attempts += 1
                 sleep(10)
-            else:
-                raise
-
+            # else:
+            #     raise
 
 def _json_to_station_objects(json_object, region):
     data_map = {}
