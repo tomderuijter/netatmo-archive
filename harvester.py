@@ -48,12 +48,11 @@ def main(write_directory, file_name):
         filtered_json.append(point)
 
     # Write data
-
-    print("Writing data to file..")
-    write_start = time()
-    save_file(
-        filtered_json, write_directory + file_name + ".json.gz")
-    print("Total write time: %fs" % (time() - write_start))
+    # print("Writing data to file..")
+    # write_start = time()
+    # save_file(
+    #     filtered_json, write_directory + file_name + ".json.gz")
+    # print("Total write time: %fs" % (time() - write_start))
 
     print("Writing data to S3..")
     write_start = time()
