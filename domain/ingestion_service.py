@@ -5,6 +5,7 @@ import multiprocessing as mp
 from datetime import datetime
 from time import time, sleep
 import botocore
+import pymongo
 
 # User modules
 from domain.json_parser import parse_stations, log_parse_stats
@@ -140,7 +141,7 @@ class FileConsumer(mp.Process):
                 except botocore.exceptions.EndpointConnectionError as e:
                     error_msg = "%s: network error. Could not download file %s." % (self.name, next_task)
                     logging.error(error_msg)
-                    self.error_queue.put((error_msg, e))
+                    self.error_queue.put((error_msg, e, next_task))
                     self.input_queue.task_done()
                     continue
                 except botocore.exceptions.ClientError as e:
@@ -148,7 +149,7 @@ class FileConsumer(mp.Process):
                         # File does not exist on Amazon side.
                         error_msg = "%s: file '%s' does not exist. Continuing." % (self.name, next_task)
                         logging.error(error_msg)
-                        self.error_queue.put((error_msg, e))
+                        self.error_queue.put((error_msg, e, next_task))
                         self.input_queue.task_done()
                         continue
                     else:
@@ -159,7 +160,7 @@ class FileConsumer(mp.Process):
             self.input_queue.task_done()
 
             # Split dictionary in chunks for distributed ingestion
-            minimum_chunk_size = 20000
+            minimum_chunk_size = 3000
             chunk_size = max(int(math.ceil(len(station_mapping) / self.worker_count)), minimum_chunk_size)
             station_mapping_parts = _split_dictionary(station_mapping, chunk_size)
             # TODO TdR 06/07/16: Debug _split_dictionary.
@@ -191,8 +192,15 @@ class JSONConsumer(mp.Process):
             with self.db_semaphore:
                 logging.info("%s: opening database connection." % self.name)
                 logging.info("%s: bulk update for %d stations." % (self.name, len(next_task)))
-                _store_stations_in_database(next_task)
-            logging.info("%s: finished task." % self.name)
+                # TODO TdR 19/07/16: bulk write error can occur sometimes.
+                try:
+                    _store_stations_in_database(next_task)
+                    logging.info("%s: finished task." % self.name)
+                except pymongo.errors.BulkWriteError as e:
+                    error_msg = "%s: BulkWriteError .." % self.name
+                    logging.error(error_msg)
+                    self.error_queue.put((error_msg, e, next_task))
+
             self.input_queue.task_done()
         return
 
@@ -216,19 +224,19 @@ def _add_to_queue(queue, tasks):
 
 
 def _download_from_s3(file_path):
-    attempts = 0
     aws_keys = load_aws_keys()
     while True:
         try:
             file_contents = load_file_aws(file_path, aws_keys)
             return file_contents
-        except botocore.exceptions.EndpointConnectionError:
-            # if attempts < 3:
-                logging.error("Connection failure while downloading %s. Trying again in 10 seconds." % file_path)
-                attempts += 1
-                sleep(10)
-            # else:
-            #     raise
+        except (
+            botocore.exceptions.EndpointConnectionError,
+            botocore.vendored.requests.packages.urllib3.exceptions.ReadTimeoutError
+        ) as e:
+            error_msg = "Connection failure while downloading %s: %s. Trying again in 10 seconds." % (file_path, e.msg)
+            logging.error(error_msg)
+            sleep(10)
+
 
 def _json_to_station_objects(json_object, region):
     data_map = {}
@@ -247,6 +255,14 @@ def _store_stations_in_database(station_dict):
 def _split_dictionary(whole_dict, chunk_size=2500):
     chunk_generator = _chunks(list(whole_dict.items()), chunk_size)
     return [dict(chunk) for chunk in chunk_generator]
+
+
+# def _dict_to_str(d):
+#     # Only print first 3 items of dict..
+#     for key in d:
+#         item = d[key]:
+#
+#     pass
 
 
 def _chunks(l, n):
@@ -269,7 +285,7 @@ if __name__ == "__main__":
     test_request.start_datetime = datetime(2016, 4, 1, 0, 0)
     test_request.end_datetime = datetime(2016, 5, 1, 0, 0)
     test_request.time_resolution = 10
-
+    test_request.region = (53.680, 2.865, 50.740, 7.323)  # Netherlands area
     program_start = time()
     main_thread = IngestionService()
     main_thread.run(test_request)
