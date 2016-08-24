@@ -58,7 +58,7 @@ def main(write_directory, file_name):
     print("Writing data to S3..")
     write_start = time()
     save_file_aws(
-        filtered_json, file_name + ".json.gz", aws_keys)
+        filtered_json, 'data/' + file_name + ".json.gz", aws_keys)
     print("Total write time: %fs" % (time() - write_start))
 
 
