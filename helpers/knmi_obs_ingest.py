@@ -58,15 +58,18 @@ class FileSystemEngine(object):
         for (count, file_name) in enumerate(request_file_names):
             print("File %d: %s" % (count + 1, file_name))
 
-            file_data = read_obs_file(self.directory + file_name)
-
-            # Append data
-            if data is None:
-                data = file_data
-            else:
-                data = data.append(file_data)
-
-        data.sort_values('valid_datetime', axis=0, inplace=True)
+            try:
+                file_data = read_obs_file(self.directory + file_name)
+                # Append data
+                if data is None:
+                    data = file_data
+                else:
+                    data = data.append(file_data)
+            except OSError:
+                print("File not found: %s" % file_name)
+                continue
+        if data is not None:
+            data.sort_values('valid_datetime', axis=0, inplace=True)
         return data
 
 

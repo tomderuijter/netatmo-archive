@@ -42,7 +42,8 @@ class IngestionService(object):
         # All files are queued at the same time. No limit required.
         self._file_queue = mp.JoinableQueue()
         # Once a file is downloaded, it is split up and put on the json queue.
-        # Limiting the json queue is required to match download speed with ingestion speed.
+        # Limiting the json queue is required to match download speed with
+        # ingestion speed.
         self._json_queue = mp.JoinableQueue(mp.cpu_count() * 2)
         self._error_queue = mp.SimpleQueue()
 
@@ -68,7 +69,8 @@ class IngestionService(object):
             self.json_consumer_count)
         self._start_json_consumers()
 
-        # Wait for file queue to be empty, so that all ingestion tasks are queued.
+        # Wait for file queue to be empty, so that all ingestion tasks are
+        # queued.
         self._file_queue.join()  # Block main thread
         logging.info("Main thread: downloading complete.")
         logging.info("Main thread: all ingestion tasks posted.")
@@ -76,7 +78,8 @@ class IngestionService(object):
         # Wait for existing json tasks to finish before closing the queue.
         # This ensures json consumers are not stopped prematurely.
         self._json_queue.join()  # Blocking operation
-        logging.info("Main thread: queueing poison pills for database ingesters.")
+        logging.info("Main thread: queueing poison pills for database "
+                     "ingesters.")
         # Shouldn't be called until the json_queue is completely empty.
         self._close_json_queue()
         logging.info("Main thread: database ingestion complete.")
@@ -103,7 +106,8 @@ class IngestionService(object):
 
     def _start_json_consumers(self):
         for _ in range(self.json_consumer_count):
-            JSONConsumer(self._db_semaphore, self._json_queue, self._error_queue).start()
+            JSONConsumer(
+                self._db_semaphore, self._json_queue, self._error_queue).start()
 
     def _close_json_queue(self):
         _add_to_queue(
@@ -116,7 +120,8 @@ class IngestionService(object):
 class FileConsumer(mp.Process):
     """Consumer process for loading and parsing files from S3."""
 
-    def __init__(self, s3_semaphore, input_queue, output_queue, error_queue, request, worker_count):
+    def __init__(self, s3_semaphore, input_queue, output_queue, error_queue,
+                 request, worker_count):
         super().__init__()
         self.s3_semaphore = s3_semaphore
         self.input_queue = input_queue
@@ -130,16 +135,20 @@ class FileConsumer(mp.Process):
         while True:
             next_task = self.input_queue.get()
             if isinstance(next_task, PoisonPill):
-                logging.info("%s: encountered %s. Exiting." % (self.name, next_task))
+                logging.info("%s: encountered %s. Exiting." %
+                             (self.name, next_task))
                 self.input_queue.task_done()
                 break
 
             with self.s3_semaphore:
-                logging.info("%s: downloading file S3://%s" % (self.name, next_task))
+                logging.info("%s: downloading file S3://%s" %
+                             (self.name, next_task))
                 try:
                     file_contents = _download_from_s3(next_task)
                 except botocore.exceptions.EndpointConnectionError as e:
-                    error_msg = "%s: network error. Could not download file %s." % (self.name, next_task)
+                    error_msg = "%s: network error. " \
+                                "Could not download file %s." % \
+                                (self.name, next_task)
                     logging.error(error_msg)
                     self.error_queue.put((error_msg, e, next_task))
                     self.input_queue.task_done()
@@ -147,7 +156,9 @@ class FileConsumer(mp.Process):
                 except botocore.exceptions.ClientError as e:
                     if e.response['Error']['Code'] == 'NoSuchKey':
                         # File does not exist on Amazon side.
-                        error_msg = "%s: file '%s' does not exist. Continuing." % (self.name, next_task)
+                        error_msg = "%s: file '%s' does not exist. " \
+                                    "Continuing." % \
+                                    (self.name, next_task)
                         logging.error(error_msg)
                         self.error_queue.put((error_msg, e, next_task))
                         self.input_queue.task_done()
@@ -155,18 +166,22 @@ class FileConsumer(mp.Process):
                     else:
                         raise
 
-            station_mapping = _json_to_station_objects(file_contents, self.request.region)
+            station_mapping = _json_to_station_objects(
+                file_contents, self.request.region)
             logging.info("%s: finished task." % self.name)
             self.input_queue.task_done()
 
             # Split dictionary in chunks for distributed ingestion
             minimum_chunk_size = 3000
-            chunk_size = max(int(math.ceil(len(station_mapping) / self.worker_count)), minimum_chunk_size)
-            station_mapping_parts = _split_dictionary(station_mapping, chunk_size)
+            chunk_size = max(int(math.ceil(
+                len(station_mapping) / self.worker_count)), minimum_chunk_size)
+            station_mapping_parts = \
+                _split_dictionary(station_mapping, chunk_size)
             # TODO TdR 06/07/16: Debug _split_dictionary.
             _add_to_queue(self.output_queue, station_mapping_parts)
             logging.info('%s: placed %d stations in %d tasks on output queue.' %
-                         (self.name, len(station_mapping), len(station_mapping_parts)))
+                         (self.name, len(station_mapping),
+                          len(station_mapping_parts)))
         return
 
 
@@ -185,13 +200,15 @@ class JSONConsumer(mp.Process):
         while True:
             next_task = self.input_queue.get()
             if isinstance(next_task, PoisonPill):
-                logging.info("%s: encountered %s. Exiting." % (self.name, next_task))
+                logging.info("%s: encountered %s. Exiting." %
+                             (self.name, next_task))
                 self.input_queue.task_done()
                 break
 
             with self.db_semaphore:
                 logging.info("%s: opening database connection." % self.name)
-                logging.info("%s: bulk update for %d stations." % (self.name, len(next_task)))
+                logging.info("%s: bulk update for %d stations." %
+                             (self.name, len(next_task)))
                 # TODO TdR 19/07/16: bulk write error can occur sometimes.
                 try:
                     _store_stations_in_database(next_task)
@@ -233,7 +250,8 @@ def _download_from_s3(file_path):
             botocore.exceptions.EndpointConnectionError,
             botocore.vendored.requests.packages.urllib3.exceptions.ReadTimeoutError
         ) as e:
-            error_msg = "Connection failure while downloading %s: %s. Trying again in 10 seconds." % (file_path, e.msg)
+            error_msg = "Connection failure while downloading %s: %s. " \
+                        "Trying again in 10 seconds." % (file_path, e.msg)
             logging.error(error_msg)
             sleep(10)
 
@@ -255,14 +273,6 @@ def _store_stations_in_database(station_dict):
 def _split_dictionary(whole_dict, chunk_size=2500):
     chunk_generator = _chunks(list(whole_dict.items()), chunk_size)
     return [dict(chunk) for chunk in chunk_generator]
-
-
-# def _dict_to_str(d):
-#     # Only print first 3 items of dict..
-#     for key in d:
-#         item = d[key]:
-#
-#     pass
 
 
 def _chunks(l, n):
