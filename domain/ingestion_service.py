@@ -1,25 +1,64 @@
 """Module for ingesting NetAtmo data into MongoDB."""
-import math
 import logging
+import math
 import multiprocessing as mp
 from datetime import datetime
 from time import time, sleep
-import botocore
-import pymongo
 
-# User modules
+import botocore
+import botocore.exceptions
+import botocore.vendored
+import pymongo
+import pymongo.errors
+
+from domain.base import DataRequest
+from domain.file_io import (list_requested_files, load_file_aws)
 from domain.json_parser import parse_stations, log_parse_stats
 from domain.load_credentials import load_aws_keys
-from domain.file_io import (list_requested_files, load_file_aws)
-from domain.base import DataRequest
 from domain.mongodb_engine import MongoDBConnector
+
+logging.basicConfig(
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    level='INFO'
+)
 
 
 class IngestionService(object):
-    """Module for ingesting files from S3 into a MongoDB."""
+    """Module for ingesting files from S3 into a MongoDB.
+
+    This is a concurrent program that works with a two-part
+    producer-consumer paradigm. The following entities are involved:
+    - There are files located on a remote resource, S3.
+    - These files need to be downloaded.
+    - The downloaded files need to be parsed to JSON.
+    - The parsing entities need to be written to a remote resource, MongoDB.
+
+    The concurrent code is separated from the domain code.
+    All concurrent code is located in this class.
+
+    Part 1: downloading files
+    -------------------------
+    First an index is built of files to be downloaded from the remote resource.
+    These are put in a file queue. This is the production phase.
+
+    The file queue is read by a pool of FileConsumer instances, who both
+    download the file and parses it to it's JSON constituents. The resulting
+    text is put in a JSON queue. This is the consumer phase, as well as the
+    production phase of the next part.
+
+    Part 2: uploading JSON
+    ----------------------
+    The second part is uploading the parsing results to a database, MongoDB.
+    This again is a producer-consumer concurrent program, with the production
+    queue being the JSON text from the previous part.
+
+    The JSON queue is being consumed by a pool of JSONConsumer workers. Each
+    JSON string is split into separate database entries and then uploaded to the
+    database separately. A single JSON text represents many database objects.
+    """
 
     def __init__(self):
-
+        """Configuration of concurrency pooling."""
         self.s3_connections = 2
         # The maximum number of s3 connections depend on the clients bandwidth
         # to the AWS servers.
@@ -87,9 +126,11 @@ class IngestionService(object):
         # TODO TdR 18/07/16: do something with error queue contents.
 
     def _add_files_to_queue(self, files_to_load):
+        """Submit a file listing to the FileConsumer worker queue."""
         _add_to_queue(self._file_queue, files_to_load)
 
     def _start_file_consumers(self, request):
+        """Start the FileConsumer worker pool."""
         for _ in range(self.file_consumer_count):
             FileConsumer(
                 self._s3_semaphore,
@@ -98,6 +139,7 @@ class IngestionService(object):
             ).start()
 
     def _close_file_queue(self):
+        """Peacefully stop FileConsumer workers."""
         _add_to_queue(
             self._file_queue,
             [PoisonPill(x + 1000) for x in range(self.file_consumer_count)])
@@ -105,11 +147,13 @@ class IngestionService(object):
         self._file_queue.join_thread()
 
     def _start_json_consumers(self):
+        """Start the JSONConsumer worker pool."""
         for _ in range(self.json_consumer_count):
             JSONConsumer(
                 self._db_semaphore, self._json_queue, self._error_queue).start()
 
     def _close_json_queue(self):
+        """Stop JSONConsumer worker pool"""
         _add_to_queue(
             self._json_queue,
             [PoisonPill(x) for x in range(self.json_consumer_count)])
@@ -118,7 +162,7 @@ class IngestionService(object):
 
 
 class FileConsumer(mp.Process):
-    """Consumer process for loading and parsing files from S3."""
+    """Consumer process for downloading and parsing files from S3."""
 
     def __init__(self, s3_semaphore, input_queue, output_queue, error_queue,
                  request, worker_count):
@@ -232,6 +276,7 @@ class PoisonPill(object):
 
 
 def _get_request_file_paths(request):
+    """List file objects to be downloaded in the remote file resource."""
     return list_requested_files(request)
 
 
@@ -248,7 +293,8 @@ def _download_from_s3(file_path):
             return file_contents
         except (
             botocore.exceptions.EndpointConnectionError,
-            botocore.vendored.requests.packages.urllib3.exceptions.ReadTimeoutError
+            botocore.vendored.requests.packages.urllib3
+                    .exceptions.ReadTimeoutError
         ) as e:
             error_msg = "Connection failure while downloading %s: %s. " \
                         "Trying again in 10 seconds." % (file_path, e.msg)
@@ -282,18 +328,15 @@ def _chunks(l, n):
 
 
 if __name__ == "__main__":
-    logging.basicConfig(
-        format='%(asctime)s - %(levelname)s - %(message)s',
-        level='INFO'
-    )
 
+    # TODO TdR 08/12/16: Why?
     import os
     os.chdir('../')
     print(os.getcwd())
 
     test_request = DataRequest()
-    test_request.start_datetime = datetime(2016, 4, 1, 0, 0)
-    test_request.end_datetime = datetime(2016, 5, 1, 0, 0)
+    test_request.start_datetime = datetime(2016, 11, 1, 0, 0)
+    test_request.end_datetime = datetime(2016, 12, 1, 0, 0)
     test_request.time_resolution = 10
     test_request.region = (53.680, 2.865, 50.740, 7.323)  # Netherlands area
     program_start = time()
