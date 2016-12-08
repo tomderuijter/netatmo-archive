@@ -1,8 +1,8 @@
 """Module for communicating with MongoDB."""
 import pymongo
+import pymongo.son_manipulator
 from bson.binary import Binary
 
-# User modules
 from domain.base import Station
 
 
@@ -15,6 +15,7 @@ class MongoDBConnector(object):
         # off may result in performance increase for write operations.
         # This comes at the cost of error reporting.
         write_concern = 1
+        # TODO TdR 08/12/16: configure database.
         self._client = pymongo.MongoClient(w=write_concern)
         self.db = self._client.netatmo
         # TODO TdR 08/07/16: Objects are not yet pushed in as stations.
@@ -36,7 +37,10 @@ class MongoDBConnector(object):
     def get_station_locations(self):
         return self.db.stations.find(
             {},
-            {'_id': 0, 'station_id': 1, 'latitude': 1, 'longitude': 1, 'elevation': 1}
+            {
+                '_id': 0, 'station_id': 1, 'latitude': 1, 'longitude': 1,
+                'elevation': 1
+            }
         )
 
 
@@ -56,18 +60,26 @@ def _construct_station_upsert_query(station):
     }
 
     if station.hydro_module is not None:
-        update['$push']['hydro_module.time_day_rain'] = {'$each': station.hydro_module['time_day_rain']}
-        update['$push']['hydro_module.time_hour_rain'] = {'$each': station.hydro_module['time_hour_rain']}
-        update['$push']['hydro_module.daily_rain_sum'] = {'$each': station.hydro_module['daily_rain_sum']}
-        update['$push']['hydro_module.hourly_rain_sum'] = {'$each': station.hydro_module['hourly_rain_sum']}
+        update['$push']['hydro_module.time_day_rain'] = {
+            '$each': station.hydro_module['time_day_rain']}
+        update['$push']['hydro_module.time_hour_rain'] = {
+            '$each': station.hydro_module['time_hour_rain']}
+        update['$push']['hydro_module.daily_rain_sum'] = {
+            '$each': station.hydro_module['daily_rain_sum']}
+        update['$push']['hydro_module.hourly_rain_sum'] = {
+            '$each': station.hydro_module['hourly_rain_sum']}
     else:
         update['$setOnInsert']['hydro_module'] = None
 
     if station.thermo_module is not None:
-        update['$push']['thermo_module.humidity'] = {'$each': station.thermo_module['humidity']}
-        update['$push']['thermo_module.pressure'] = {'$each': station.thermo_module['pressure']}
-        update['$push']['thermo_module.temperature'] = {'$each': station.thermo_module['temperature']}
-        update['$push']['thermo_module.valid_datetime'] = {'$each': station.thermo_module['valid_datetime']}
+        update['$push']['thermo_module.humidity'] = {
+            '$each': station.thermo_module['humidity']}
+        update['$push']['thermo_module.pressure'] = {
+            '$each': station.thermo_module['pressure']}
+        update['$push']['thermo_module.temperature'] = {
+            '$each': station.thermo_module['temperature']}
+        update['$push']['thermo_module.valid_datetime'] = {
+            '$each': station.thermo_module['valid_datetime']}
     else:
         update['$setOnInsert']['thermo_module'] = None
 
@@ -82,14 +94,15 @@ class BinaryTransformer(pymongo.son_manipulator.SONManipulator):
     def transform_incoming(self, son, collection):
         for (key, value) in son.items():
             if isinstance(value, Station):
-                son[key] = value.to_binary(value)
+                son[key] = value.to_binary()
             elif isinstance(value, dict):
                 son[key] = self.transform_incoming(value, collection)
         return son
 
     def transform_outgoing(self, son, collection):
         for (key, value) in son.items():
-            if isinstance(value, Binary) and value.subtype == Station.binary_subtype:
+            if isinstance(value, Binary) and \
+                            value.subtype == Station.binary_subtype:
                 son[key] = Station.from_binary(value)
             elif isinstance(value, dict):
                 son[key] = self.transform_outgoing(value, collection)
