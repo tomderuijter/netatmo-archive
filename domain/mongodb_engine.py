@@ -46,19 +46,24 @@ class MongoDBConnector(object):
 
 
 def _get_primary_key(station):
-    date = _get_current_date(station)
-    return {'station_id': station.station_id, "date": date}
+    date, hour = _get_current_date(station)
+    return {
+        'station_id': station.station_id,
+        'date': date,
+        'hour': hour
+    }
 
 
 def _get_current_date(station):
 
     if station.thermo_module is not None and \
                     len(station.thermo_module['valid_datetime']) > 0:
-
-        return date_to_str(station.thermo_module['valid_datetime'][0])
+        date = station.thermo_module['valid_datetime'][0]
+        return date_to_str(date), date.hour
     elif station.thermo_module is not None and \
             len(station.hydro_module['time_hour_rain']) > 0:
-        return date_to_str(station.hydro_module['time_hour_rain'][0])
+        date = station.hydro_module['time_hour_rain'][0]
+        return date_to_str(date), date.hour
     else:
         raise RuntimeError("No data in record.")
 
