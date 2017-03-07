@@ -2,16 +2,14 @@
 import logging
 import math
 import multiprocessing as mp
-from datetime import datetime
-from time import time, sleep
+from time import sleep
 
 import botocore
 import botocore.exceptions
-import botocore.vendored
+import botocore.vendored.requests.packages
 import pymongo
 import pymongo.errors
 
-from domain.base import DataRequest
 from domain.file_io import (list_requested_files, load_file_aws)
 from domain.json_parser import parse_stations, log_parse_stats
 from domain.load_credentials import load_aws_keys
@@ -23,6 +21,7 @@ logging.basicConfig(
 )
 
 
+# TODO TdR 09/12/16: limit the size of the JSONQueue. JSONConsumers get flooded.
 class IngestionService(object):
     """Module for ingesting files from S3 into a MongoDB.
 
@@ -287,6 +286,7 @@ def _add_to_queue(queue, tasks):
 
 def _download_from_s3(file_path):
     aws_keys = load_aws_keys()
+    file_path = 'data/' + file_path
     while True:
         try:
             file_contents = load_file_aws(file_path, aws_keys)
@@ -296,8 +296,13 @@ def _download_from_s3(file_path):
             botocore.vendored.requests.packages.urllib3
                     .exceptions.ReadTimeoutError
         ) as e:
+            if hasattr(e, 'msg'):
+                e_msg = e.msg
+            else:
+                e_msg = str(e)
+
             error_msg = "Connection failure while downloading %s: %s. " \
-                        "Trying again in 10 seconds." % (file_path, e.msg)
+                        "Trying again in 10 seconds." % (file_path, e_msg)
             logging.error(error_msg)
             sleep(10)
 
@@ -325,22 +330,3 @@ def _chunks(l, n):
     """Yield successive n-sized chunks from l."""
     for i in range(0, len(l), n):
         yield l[i:i+n]
-
-
-if __name__ == "__main__":
-
-    # TODO TdR 08/12/16: Why?
-    import os
-    os.chdir('../')
-    print(os.getcwd())
-
-    test_request = DataRequest()
-    test_request.start_datetime = datetime(2016, 11, 1, 0, 0)
-    test_request.end_datetime = datetime(2016, 12, 1, 0, 0)
-    test_request.time_resolution = 10
-    test_request.region = (53.680, 2.865, 50.740, 7.323)  # Netherlands area
-    program_start = time()
-    main_thread = IngestionService()
-    main_thread.run(test_request)
-    program_end = time()
-    logging.info('Program finished (%ds).' % (program_end - program_start))

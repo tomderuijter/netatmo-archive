@@ -1,8 +1,8 @@
-from datetime import datetime
-from numpy import nan
 import logging
+from datetime import datetime
 
-# User modules
+from numpy import nan
+
 from domain.base import Station
 
 

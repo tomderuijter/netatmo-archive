@@ -68,18 +68,30 @@ def select_near(data_map, latitude, longitude, radius=5000):
 
     parameters
     ----------
-    data_map: dict, mapping of station id to Station objects.
+    data_map: dict or list, mapping of station id to Station objects.
     latitude: float, latitude of interest.
     longitude: float, longitude of interest.
     radius: float (optional), maximum search radius in meters.
     """
-    filtered_map = {}
-    for station_id in data_map:
-        station = data_map[station_id]
-        station_dist = _distance(
-            (station.latitude, station.longitude),
-            (latitude, longitude)
-        )
-        if station_dist <= radius:
-            filtered_map[station_id] = station
-    return filtered_map
+
+    if isinstance(data_map, dict):
+        filtered_map = {}
+        for station_id in data_map:
+            station = data_map[station_id]
+            station_dist = _distance(
+                (station.latitude, station.longitude),
+                (latitude, longitude)
+            )
+            if station_dist <= radius:
+                filtered_map[station_id] = station
+        return filtered_map
+    else:
+        filtered_map = []
+        for station in data_map:
+            station_dist = _distance(
+                (station.latitude, station.longitude),
+                (latitude, longitude)
+            )
+            if station_dist <= radius:
+                filtered_map.append(station)
+        return filtered_map

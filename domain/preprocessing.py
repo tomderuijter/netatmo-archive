@@ -15,7 +15,7 @@ def resample_and_interpolate(data_map, resolution=10):
             df = pd.DataFrame(station.thermo_module)
             df.set_index('valid_datetime', drop=True, inplace=True)
             interpolation_limit = 3 if resolution <= 20 else 0
-            df = df.resample(str(resolution) + 'T').mean().interpolate(
+            df = df.resample(str(resolution) + 'T').bfill().interpolate(
                 method='time',
                 limit=interpolation_limit
             )

@@ -1,9 +1,8 @@
-import os
 import gzip
 import json
+import os
 from datetime import timedelta, datetime
 
-# User modules
 from domain.aws_engine import S3Bucket
 from domain.base import DataRequest, DataResponse
 from domain.json_parser import parse_stations, log_parse_stats
