@@ -1,4 +1,6 @@
 """Module for communicating with MongoDB."""
+import logging
+
 import pymongo
 import pymongo.son_manipulator
 from bson.binary import Binary
@@ -17,7 +19,7 @@ class MongoDBConnector(object):
         write_concern = 1
         # TODO TdR 08/12/16: configure database.
         self._client = pymongo.MongoClient(w=write_concern)
-        self.db = self._client.netatmo
+        self.db = self._client.netatmo  # Database name
         # TODO TdR 08/07/16: Objects are not yet pushed in as stations.
         self.db.add_son_manipulator(BinaryTransformer())
 
@@ -25,33 +27,51 @@ class MongoDBConnector(object):
         self._client.close()
 
     def upsert_stations(self, station_dict):
+        """Update station records or insert them otherwise."""
+        skipped = 0
         bulk = self.db.stations.initialize_unordered_bulk_op()
         for station_id in station_dict:
-            station = station_dict[station_id]
-            query = {'_id': station_id}
-            update = _construct_station_upsert_query(station)
-            bulk.find(query).upsert().update(update)
-            # self.db.stations.update(query, update, True)
+            try:
+                station = station_dict[station_id]
+
+                query = {'_id': _get_primary_key(station)}
+                update = _construct_station_upsert_query(station)
+                bulk.find(query).upsert().update(update)
+                # self.db.stations.update(query, update, True)
+            except RuntimeError:
+                skipped += 1
+                continue
         bulk.execute()
-
-    def get_station_locations(self):
-        return self.db.stations.find(
-            {},
-            {
-                '_id': 0, 'station_id': 1, 'latitude': 1, 'longitude': 1,
-                'elevation': 1
-            }
-        )
+        logging.info("%d records were skipped due to missing data." % skipped)
 
 
-def _add_primary_key(station_dict):
-    station_dict['_id'] = station_dict['station_id']
+def _get_primary_key(station):
+    date = _get_current_date(station)
+    return {'station_id': station.station_id, "date": date}
+
+
+def _get_current_date(station):
+
+    if station.thermo_module is not None and \
+                    len(station.thermo_module['valid_datetime']) > 0:
+
+        return date_to_str(station.thermo_module['valid_datetime'][0])
+    elif station.thermo_module is not None and \
+            len(station.hydro_module['time_hour_rain']) > 0:
+        return date_to_str(station.hydro_module['time_hour_rain'][0])
+    else:
+        raise RuntimeError("No data in record.")
+
+
+def date_to_str(datetime):
+    date_str = "%Y%m%d"
+    return datetime.date().strftime(date_str)
 
 
 def _construct_station_upsert_query(station):
     update = {
         '$setOnInsert': {
-            '_id': station.station_id,
+            '_id': _get_primary_key(station),
             'elevation': station.elevation,
             'latitude': station.latitude,
             'longitude': station.longitude
