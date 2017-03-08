@@ -35,7 +35,12 @@ def parse_stations(station_list, data_map, region=None):
             continue
 
         # Extract data
-        station_id = point['_id']
+        if 'station_id' in point:
+            station_id = point['station_id']
+        elif isinstance(point['_id'], dict) and 'station_id' in point['_id']:
+            station_id = point['_id']['station_id']
+        else:
+            station_id = point['_id']
         lon, lat = point['location']
 
         #   See if station is in requested region

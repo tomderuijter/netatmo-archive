@@ -77,6 +77,7 @@ def _construct_station_upsert_query(station):
     update = {
         '$setOnInsert': {
             '_id': _get_primary_key(station),
+            'station_id': station.station_id,
             'elevation': station.elevation,
             'latitude': station.latitude,
             'longitude': station.longitude
